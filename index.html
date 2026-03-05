@@ -963,7 +963,7 @@
                                   <span className={`text-2xl sm:text-3xl font-black w-8 sm:w-10 text-right sm:text-center ${getDayColor(day)}`}>{day}</span>
                                   <span className={`text-base sm:text-lg font-bold ${getDayColor(day)}`}>{getDayOfWeek(day)}</span>
                                 </div>
-                                {dailyNotes[day] && <span className="text-sm bg-red-100 text-red-700 font-bold px-2.5 py-1 rounded-md leading-tight truncate max-w-full"><Icon name="bell" size={14} className="mr-1"/>{dailyNotes[day]}</span>}
+                                {dailyNotes[day] && <span className="text-sm bg-red-100 text-red-700 font-bold px-2.5 py-1 rounded-md leading-tight whitespace-normal break-words max-w-full text-left"><Icon name="bell" size={14} className="mr-1 inline-block"/>{dailyNotes[day]}</span>}
                               </div>
                               
                               <div className="flex gap-1.5 sm:gap-2 w-full sm:w-auto">
@@ -1040,7 +1040,7 @@
                             <div className="text-center border-b border-gray-100 pb-2">
                               <div className={`text-xl sm:text-2xl font-black leading-tight ${getDayColor(day)}`}>{day}</div>
                               <div className={`text-xs sm:text-sm font-bold mt-0.5 ${getDayColor(day)}`}>{getDayOfWeek(day)}</div>
-                              {dailyNotes[day] && <div className="text-[10px] sm:text-xs bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded-md mt-1.5 truncate"><Icon name="bell" className="mr-1"/>{dailyNotes[day]}</div>}
+                              {dailyNotes[day] && <div className="text-[10px] sm:text-xs bg-red-100 text-red-700 font-bold px-1.5 py-1 rounded-md mt-1.5 whitespace-normal break-words text-left leading-tight"><Icon name="bell" className="mr-1 inline-block"/>{dailyNotes[day]}</div>}
                             </div>
 
                             <div className="grid grid-cols-2 gap-1 mt-1">
