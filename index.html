@@ -1116,9 +1116,9 @@
                               <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-2 sm:gap-3 sm:pl-20 mt-1 w-full sm:w-auto">
                                 {isRest && <span className="text-xs sm:text-sm font-bold text-orange-500 self-end sm:self-auto mr-1">出勤可能時間:</span>}
                                 <div className="flex items-center justify-end gap-1.5 w-full sm:w-auto">
-                                  <select value={shiftData.start} onChange={(e) => updateLocalShift(day, 'start', e.target.value)} disabled={isDisabled} className={`bg-white border text-xs sm:text-sm rounded-md block px-1.5 py-1.5 w-[5rem] sm:w-[5.5rem] text-center appearance-none disabled:bg-gray-100 ${isRest ? 'border-orange-300 text-orange-800' : 'border-blue-200 text-blue-900'}`} style={{ textAlignLast: 'center' }}>{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
+                                  <select value={shiftData.start} onChange={(e) => updateLocalShift(day, 'start', e.target.value)} disabled={isDisabled} className={`bg-white border text-xs sm:text-sm rounded-md block px-0 py-1.5 w-[3.5rem] sm:w-[4.5rem] text-center appearance-none disabled:bg-gray-100 ${isRest ? 'border-orange-300 text-orange-800' : 'border-blue-200 text-blue-900'}`} style={{ textAlignLast: 'center' }}>{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
                                   <span className="text-gray-400 font-bold text-sm">~</span>
-                                  <select value={shiftData.end} onChange={(e) => updateLocalShift(day, 'end', e.target.value)} disabled={isDisabled} className={`bg-white border text-xs sm:text-sm rounded-md block px-1.5 py-1.5 w-[5rem] sm:w-[5.5rem] text-center appearance-none disabled:bg-gray-100 ${isRest ? 'border-orange-300 text-orange-800' : 'border-blue-200 text-blue-900'}`} style={{ textAlignLast: 'center' }}>{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
+                                  <select value={shiftData.end} onChange={(e) => updateLocalShift(day, 'end', e.target.value)} disabled={isDisabled} className={`bg-white border text-xs sm:text-sm rounded-md block px-0 py-1.5 w-[3.5rem] sm:w-[4.5rem] text-center appearance-none disabled:bg-gray-100 ${isRest ? 'border-orange-300 text-orange-800' : 'border-blue-200 text-blue-900'}`} style={{ textAlignLast: 'center' }}>{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
                                 </div>
                               </div>
                             )}
@@ -1178,9 +1178,9 @@
                             </div>
                             {(s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded)) && (
                               <div className="flex flex-col gap-1 mt-auto pt-2">
-                                <select value={s.start} onChange={(e) => updateLocalShift(day, 'start', e.target.value)} disabled={rowDisabled} className="bg-gray-50 border border-gray-300 rounded-md text-xs sm:text-sm p-1.5 text-center font-bold appearance-none">{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t || '--:--'}</option>)}</select>
+                                <select value={s.start} onChange={(e) => updateLocalShift(day, 'start', e.target.value)} disabled={rowDisabled} className="w-full bg-gray-50 border border-gray-300 rounded-md text-xs sm:text-sm py-1.5 px-0 text-center font-bold appearance-none" style={{ textAlignLast: 'center' }}>{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t || '--:--'}</option>)}</select>
                                 <div className="text-center text-gray-300 text-[10px] leading-none">▼</div>
-                                <select value={s.end} onChange={(e) => updateLocalShift(day, 'end', e.target.value)} disabled={rowDisabled} className="bg-gray-50 border border-gray-300 rounded-md text-xs sm:text-sm p-1.5 text-center font-bold appearance-none">{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t || '--:--'}</option>)}</select>
+                                <select value={s.end} onChange={(e) => updateLocalShift(day, 'end', e.target.value)} disabled={rowDisabled} className="w-full bg-gray-50 border border-gray-300 rounded-md text-xs sm:text-sm py-1.5 px-0 text-center font-bold appearance-none" style={{ textAlignLast: 'center' }}>{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t || '--:--'}</option>)}</select>
                               </div>
                             )}
                             {s.status !== '未' && <input type="text" value={s.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={rowDisabled} placeholder="備考" className="mt-2 bg-white border border-gray-300 rounded-md text-xs p-1.5 text-center focus:ring-1 focus:ring-blue-300 outline-none disabled:bg-gray-50 shadow-inner" />}
@@ -1224,13 +1224,13 @@
                                   <div className="flex justify-center items-center mb-2"><span className={`text-base font-black ${getDayColor(day)}`}>{day}</span></div>
                                   {dailyNotes[day] && <div className="bg-red-50 text-red-600 border border-red-200 rounded-md text-[11px] sm:text-xs font-bold px-2 py-1.5 shadow-sm w-full text-center whitespace-normal break-words leading-tight mb-2">{dailyNotes[day]}</div>}
                                   <div className="mt-auto flex flex-col gap-1.5">
-                                    <select value={s.status} onChange={(e) => updateLocalShift(day, 'status', e.target.value)} disabled={rowDisabled} className={`w-full rounded-md text-sm p-1.5 border outline-none appearance-none text-center shadow-sm cursor-pointer ${statusColorClass} disabled:opacity-50 relative z-10`}>
+                                    <select value={s.status} onChange={(e) => updateLocalShift(day, 'status', e.target.value)} disabled={rowDisabled} className={`w-full rounded-md text-sm p-1.5 px-0 border outline-none appearance-none text-center shadow-sm cursor-pointer ${statusColorClass} disabled:opacity-50 relative z-10`} style={{ textAlignLast: 'center' }}>
                                       <option value="未" className="text-gray-600 bg-white">未入力</option><option value="休" className="text-red-600 bg-white">休 み</option><option value="有休" className="text-teal-600 bg-white">有 休</option><option value="勤務" className="text-blue-600 bg-white">勤 務</option>
                                     </select>
                                     {(s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded)) && (
                                       <div className="flex flex-col gap-1 mt-1 relative z-10">
-                                        <select value={s.start} onChange={(e) => updateLocalShift(day, 'start', e.target.value)} disabled={rowDisabled} className="bg-white rounded-md border border-gray-300 text-sm p-1 text-center font-bold shadow-inner appearance-none">{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t || '-'}</option>)}</select>
-                                        <select value={s.end} onChange={(e) => updateLocalShift(day, 'end', e.target.value)} disabled={rowDisabled} className="bg-white rounded-md border border-gray-300 text-sm p-1 text-center font-bold shadow-inner appearance-none">{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t || '-'}</option>)}</select>
+                                        <select value={s.start} onChange={(e) => updateLocalShift(day, 'start', e.target.value)} disabled={rowDisabled} className="w-full bg-white rounded-md border border-gray-300 text-xs sm:text-sm py-1 px-0 text-center font-bold shadow-inner appearance-none" style={{ textAlignLast: 'center' }}>{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t || '-'}</option>)}</select>
+                                        <select value={s.end} onChange={(e) => updateLocalShift(day, 'end', e.target.value)} disabled={rowDisabled} className="w-full bg-white rounded-md border border-gray-300 text-xs sm:text-sm py-1 px-0 text-center font-bold shadow-inner appearance-none" style={{ textAlignLast: 'center' }}>{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t || '-'}</option>)}</select>
                                       </div>
                                     )}
                                     {s.status !== '未' && <div className="relative w-full z-10 mt-1"><input type="text" value={s.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={rowDisabled} placeholder="備考" className="bg-white rounded-md border border-gray-300 text-xs p-1.5 text-center shadow-inner w-full focus:ring-1 focus:ring-blue-300 outline-none disabled:bg-transparent" /></div>}
@@ -2032,9 +2032,9 @@
 
                           {(isWorking || (isRest && shiftData.canWorkIfNeeded)) && (
                             <div className="flex items-center justify-center sm:justify-end gap-1.5 w-full sm:w-auto ml-auto">
-                              <select value={shiftData.start} onChange={(e) => updateFixedShiftForm(dow, 'start', e.target.value)} className={`bg-white rounded-md border text-xs sm:text-sm block px-1 py-1 w-[4.5rem] sm:w-[5.5rem] text-center appearance-none ${isRest ? 'border-orange-300 text-orange-800' : 'border-blue-200 text-blue-900'}`} style={{ textAlignLast: 'center' }}>{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
+                              <select value={shiftData.start} onChange={(e) => updateFixedShiftForm(dow, 'start', e.target.value)} className={`bg-white rounded-md border text-xs sm:text-sm block py-1 px-0 w-[4rem] sm:w-[5rem] text-center appearance-none ${isRest ? 'border-orange-300 text-orange-800' : 'border-blue-200 text-blue-900'}`} style={{ textAlignLast: 'center' }}>{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
                               <span className="text-gray-400 font-bold">~</span>
-                              <select value={shiftData.end} onChange={(e) => updateFixedShiftForm(dow, 'end', e.target.value)} className={`bg-white rounded-md border text-xs sm:text-sm block px-1 py-1 w-[4.5rem] sm:w-[5.5rem] text-center appearance-none ${isRest ? 'border-orange-300 text-orange-800' : 'border-blue-200 text-blue-900'}`} style={{ textAlignLast: 'center' }}>{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
+                              <select value={shiftData.end} onChange={(e) => updateFixedShiftForm(dow, 'end', e.target.value)} className={`bg-white rounded-md border text-xs sm:text-sm block py-1 px-0 w-[4rem] sm:w-[5rem] text-center appearance-none ${isRest ? 'border-orange-300 text-orange-800' : 'border-blue-200 text-blue-900'}`} style={{ textAlignLast: 'center' }}>{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
                             </div>
                           )}
 
@@ -2220,11 +2220,11 @@
 
                       {(changeForm.status === '勤務' || (changeForm.status === '休' && changeForm.canWorkIfNeeded)) && (
                         <div className="flex items-center gap-2 mb-3">
-                          <select value={changeForm.start} onChange={(e) => setChangeForm({...changeForm, start: e.target.value})} className="flex-1 rounded-md bg-white border border-gray-300 text-base p-2.5 text-center font-bold">
+                          <select value={changeForm.start} onChange={(e) => setChangeForm({...changeForm, start: e.target.value})} className="flex-1 rounded-md bg-white border border-gray-300 text-sm sm:text-base py-2.5 px-0 text-center font-bold appearance-none" style={{ textAlignLast: 'center' }}>
                             {HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}
                           </select>
                           <span className="text-gray-400 font-bold">~</span>
-                          <select value={changeForm.end} onChange={(e) => setChangeForm({...changeForm, end: e.target.value})} className="flex-1 rounded-md bg-white border border-gray-300 text-base p-2.5 text-center font-bold">
+                          <select value={changeForm.end} onChange={(e) => setChangeForm({...changeForm, end: e.target.value})} className="flex-1 rounded-md bg-white border border-gray-300 text-sm sm:text-base py-2.5 px-0 text-center font-bold appearance-none" style={{ textAlignLast: 'center' }}>
                             {HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}
                           </select>
                         </div>
