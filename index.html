@@ -106,14 +106,14 @@
       { employeeId: '9999', id: 'admin', name: '管理者 (SV)', email: 'admin@example.com', role: 'admin', status: 'active', password: '9999' },
     ];
 
+    // 💡 リンクが「こちら」になることを想定し、テンプレートの初期文章を少し調整しました
     const INITIAL_TEMPLATES = [
-      { id: 't1', name: '【シフトの窓口】{month}月シフト提出依頼', body: 'お疲れ様です。\n\n{month}月のシフト提出期間が開始しました。\n提出期限は「{deadline}」となっておりますので、期限までのご提出をお願いいたします。\n\n▼ シフトの窓口（提出はこちらから）\nhttps://cx2-2g3t.github.io/shift-app/' },
-      { id: 't2', name: '【シフトの窓口】未提出者へのリマインド', body: 'お疲れ様です。\n\n{month}月のシフト提出がまだ確認できておりません。\n提出期限は「{deadline}」となっておりますので、至急ご提出をお願いいたします。\n\n▼ シフトの窓口（提出はこちらから）\nhttps://cx2-2g3t.github.io/shift-app/' },
-      { id: 't3', name: '【シフトの窓口】{month}月シフト確定のお知らせ', body: 'お疲れ様です。\n\n{month}月のシフトが確定しました。\nシフト表をご確認ください。\n\n▼ シフトの窓口（確認はこちらから）\nhttps://cx2-2g3t.github.io/shift-app/' },
-      { id: 't4', name: '【シフトの窓口】シフト調整のお願い', body: 'お疲れ様です。\n\n出勤人数の調整をお願いしたい日がございます。\nご対応可能な方は管理者までご連絡ください。\n\n▼ シフトの窓口（確認はこちらから）\nhttps://cx2-2g3t.github.io/shift-app/' },
+      { id: 't1', name: '【シフトの窓口】{month}月シフト提出依頼', body: 'お疲れ様です。\n\n{month}月のシフト提出期間が開始しました。\n提出期限は「{deadline}」となっておりますので、期限までのご提出をお願いいたします。\n\n▼ シフトの提出は\nhttps://cx2-2g3t.github.io/shift-app/' },
+      { id: 't2', name: '【シフトの窓口】未提出者へのリマインド', body: 'お疲れ様です。\n\n{month}月のシフト提出がまだ確認できておりません。\n提出期限は「{deadline}」となっておりますので、至急ご提出をお願いいたします。\n\n▼ シフトの提出は\nhttps://cx2-2g3t.github.io/shift-app/' },
+      { id: 't3', name: '【シフトの窓口】{month}月シフト確定のお知らせ', body: 'お疲れ様です。\n\n{month}月のシフトが確定しました。\nシフト表をご確認ください。\n\n▼ シフトの確認は\nhttps://cx2-2g3t.github.io/shift-app/' },
+      { id: 't4', name: '【シフトの窓口】シフト調整のお願い', body: 'お疲れ様です。\n\n出勤人数の調整をお願いしたい日がございます。\nご対応可能な方は管理者までご連絡ください。\n\n▼ シフトの確認は\nhttps://cx2-2g3t.github.io/shift-app/' },
     ];
 
-    // 💡 デフォルトを空欄にし、時間の選択肢から0:00を削除
     const DEFAULT_START_TIME = '';
     const DEFAULT_END_TIME = '';
     const START_HOUR = 7;
@@ -236,6 +236,23 @@
         return text
           .replace(/{month}/g, currentMonth)
           .replace(/{deadline}/g, formattedDeadline);
+      };
+
+      // 💡 指定のURLを「こちら」というハイパーリンクに変換して表示するヘルパー関数
+      const renderTextWithLink = (text) => {
+        if (!text) return null;
+        const targetUrl = 'https://cx2-2g3t.github.io/shift-app/';
+        const parts = text.split(targetUrl);
+        return parts.map((part, index) => (
+          <React.Fragment key={index}>
+            {part}
+            {index < parts.length - 1 && (
+              <a href={targetUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold underline hover:text-blue-800" onClick={(e) => e.stopPropagation()}>
+                こちら
+              </a>
+            )}
+          </React.Fragment>
+        ));
       };
 
       const getDayOfWeek = (day) => DOW_NAMES[new Date(currentYear, currentMonth - 1, day).getDay()];
@@ -1027,7 +1044,7 @@
                               <p className="text-sm font-bold text-blue-800">【{mail.type}】</p>
                               <span className="text-xs text-gray-500">{mail.date}</span>
                             </div>
-                            <p className="text-base text-gray-800 leading-relaxed whitespace-pre-wrap">{mail.text}</p>
+                            <p className="text-base text-gray-800 leading-relaxed whitespace-pre-wrap">{renderTextWithLink(mail.text)}</p>
                           </div>
                         </div>
                       </div>
@@ -1157,7 +1174,7 @@
                               <button onClick={() => updateLocalShift(day, 'status', '未')} disabled={rowDisabled} className={`py-1.5 rounded-md text-xs sm:text-sm font-bold transition-colors border ${s.status === '未' ? 'bg-gray-600 text-white border-gray-600' : 'bg-white border-gray-300 text-gray-500'} disabled:opacity-40`}>未</button>
                               <button onClick={() => updateLocalShift(day, 'status', '休')} disabled={rowDisabled} className={`py-1.5 rounded-md text-xs sm:text-sm font-bold transition-colors border ${s.status === '休' ? 'bg-red-500 text-white border-red-500' : 'bg-white border-gray-300 text-gray-700'} disabled:opacity-40`}>休</button>
                               <button onClick={() => updateLocalShift(day, 'status', '有休')} disabled={rowDisabled} className={`py-1.5 rounded-md text-xs sm:text-sm font-bold transition-colors border ${s.status === '有休' ? 'bg-teal-500 text-white border-teal-500' : 'bg-white border-gray-300 text-gray-700'} disabled:opacity-40`}>有休</button>
-                              <button onClick={() => updateLocalShift(day, 'status', '勤務')} disabled={rowDisabled} className={`py-1.5 rounded-md text-xs sm:text-sm font-bold transition-colors border ${s.status === '勤務' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300 text-blue-700'} disabled:opacity-40`}>勤</button>
+                              <button onClick={() => updateLocalShift(day, 'status', '勤務')} disabled={rowDisabled} className={`py-1.5 rounded-md text-xs sm:text-sm font-bold transition-colors border ${s.status === '勤務' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300 text-blue-700'} disabled:opacity-40`}>勤務</button>
                             </div>
                             {(s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded)) && (
                               <div className="flex flex-col gap-1 mt-auto pt-2">
@@ -1204,7 +1221,7 @@
                               return (
                                 <div key={day} className={`p-2 sm:p-3 border-r last:border-r-0 border-gray-200 min-h-[140px] flex flex-col relative transition-colors ${isPendingDay ? 'bg-orange-50' : 'hover:bg-blue-50/10'} hover:z-[100]`}>
                                   {isPendingDay && <div className="absolute top-1 right-1 bg-orange-500 text-white rounded-md text-[10px] sm:text-xs font-bold px-2 py-0.5 shadow-sm z-10">申請中</div>}
-                                  <div className="flex justify-between items-start mb-2"><span className={`text-base font-black ${getDayColor(day)}`}>{day}</span></div>
+                                  <div className="flex justify-center items-center mb-2"><span className={`text-base font-black ${getDayColor(day)}`}>{day}</span></div>
                                   {dailyNotes[day] && <div className="bg-red-50 text-red-600 border border-red-200 rounded-md text-[11px] sm:text-xs font-bold px-2 py-1.5 shadow-sm w-full text-center whitespace-normal break-words leading-tight mb-2">{dailyNotes[day]}</div>}
                                   <div className="mt-auto flex flex-col gap-1.5">
                                     <select value={s.status} onChange={(e) => updateLocalShift(day, 'status', e.target.value)} disabled={rowDisabled} className={`w-full rounded-md text-sm p-1.5 border outline-none appearance-none text-center shadow-sm cursor-pointer ${statusColorClass} disabled:opacity-50 relative z-10`}>
@@ -1942,7 +1959,7 @@
                                   <button onClick={() => deleteTemplate(tpl.id)} className="bg-red-50 rounded-md hover:bg-red-100 text-red-600 p-2 transition-colors" title="削除"><Icon name="trash" /></button>
                                 </div>
                               </div>
-                              <pre className="text-sm text-gray-600 whitespace-pre-wrap font-sans leading-relaxed flex-1 overflow-hidden">{generateMailText(tpl.body)}</pre>
+                              <div className="text-sm text-gray-600 whitespace-pre-wrap font-sans leading-relaxed flex-1 overflow-hidden">{renderTextWithLink(generateMailText(tpl.body))}</div>
                             </div>
                           ))}
                         </div>
@@ -2064,7 +2081,7 @@
                           <span className="text-gray-800 leading-relaxed">{mail.targetNames}</span>
                         </div>
                         <div className="bg-gray-50 rounded-md p-3 text-sm text-gray-700 whitespace-pre-wrap border border-gray-200">
-                          {mail.text}
+                          {renderTextWithLink(mail.text)}
                         </div>
                       </div>
                     ))
