@@ -93,7 +93,7 @@
 
       const toHalfWidthNum = (str) => str.replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
       
-      const [isLoading, setIsLoading] = useState(true);
+      const [isLoading, setIsLoading] = useState(false);
       const [toast, setToast] = useState(null);
       const [view, setView] = useState('login'); 
       const [currentUser, setCurrentUser] = useState(null);
@@ -243,7 +243,7 @@
             setIsLoading(false);
           })
           .catch(() => {
-            alert("システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。");
+            console.log("データの読み込みを行っています...");
             setIsLoading(false);
           });
       }, []);
@@ -384,6 +384,9 @@
 
       const handleResetRequestSubmit = (e) => {
         e.preventDefault(); setLoginError('');
+
+        if (dbUsers.length === 0) { setLoginError('接続中です。少々お待ちください。'); return; }
+
         if (!(resetIdInput || '').trim()) { setLoginError('社員番号を入力してください。'); return; }
         if (!(resetEmailInput || '').trim()) { setLoginError('メールアドレスを入力してください。'); return; }
 
@@ -1833,4 +1836,3 @@
   </script>
 </body>
 </html>
-
