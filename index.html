@@ -67,9 +67,11 @@
     };
 
     function App() {
-      const GAS_URL = "https://script.google.com/macros/s/AKfycbwYFWovMf9RkZZvO6nQhjuk3dCFJodT9NnXgYubU7EVwhT9b1azb1pOK3xOJTx0vQIo/exec";
+      // =========================================================
+      // ★ここに新しく発行したGASのウェブアプリURLを貼り付けてください！
+      // =========================================================
+      const GAS_URL = "https://script.google.com/macros/s/AKfycbyjCN5SO-HilpcVO_AH89IfGcCqKSEd9omAYJswzfZZyDoYAduOLS1WmGaFkGluvb3u/exec";
 
-      // 💡 エラーの原因をあぶり出すように強化した通信機能
       const fetchGAS = (action, ...args) => {
         return fetch(GAS_URL, {
           method: 'POST',
@@ -179,6 +181,26 @@
       const hasPending = Object.keys(myPendingDays).length > 0;
       const myStatus = safeUserId ? (submissionStatus[safeUserId] || '未提出') : '未提出';
 
+      // 💡 データベースと連動して既読状態を記録する機能
+      const markMailAsRead = (mail) => {
+        // readByを配列として取得
+        const newReadBy = mail.readBy ? (typeof mail.readBy === 'string' ? JSON.parse(mail.readBy) : mail.readBy) : [];
+        if (!newReadBy.includes(safeUserId)) {
+          newReadBy.push(safeUserId);
+          const updatedMail = { ...mail, readBy: newReadBy };
+          
+          // 画面に即座に反映して消す
+          setSentMails(prev => prev.map(m => m.id === mail.id ? updatedMail : m));
+          setStaffMails(prev => {
+            const updatedUserMails = (prev[safeUserId] || []).map(m => m.id === mail.id ? updatedMail : m);
+            return { ...prev, [safeUserId]: updatedUserMails };
+          });
+
+          // バックエンド（GAS）に保存して別端末にも同期
+          fetchGAS('saveRecord', 'mailHistory', 'id', updatedMail).catch(e => console.error("既読保存エラー", e));
+        }
+      };
+
       const weeks = useMemo(() => {
         const startDayOfWeek = new Date(currentYear, currentMonth - 1, 1).getDay();
         const emptyCells = Array.from({ length: startDayOfWeek }, () => null);
@@ -231,12 +253,14 @@
 
             setChangeRequests(data.changeRequests || []);
             setEmailTemplates(data.templates || []);
-            setSentMails(data.mailHistory || []);
             setAdminNotifications(data.notifications || []);
+            
+            const historyReversed = [...(data.mailHistory || [])].reverse();
+            setSentMails(historyReversed);
             
             const mailsState = {};
             (data.users || []).forEach(u => {
-              const userMails = (data.mailHistory || []).filter(m => m.targetNames.includes(u.name));
+              const userMails = historyReversed.filter(m => m.targetNames.includes(u.name) || m.targetNames.includes(getDisplayName(u.name)));
               if (userMails.length > 0) mailsState[u.id] = userMails;
             });
             setStaffMails(mailsState);
@@ -336,7 +360,6 @@
 
       const changeMonth = (offset) => { setDisplayDate(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1)); setSelectedDay(1); setCurrentWeekIndex(0); };
 
-      // 💡 ログイン処理（エラーをそのまま画面に出すように修正）
       const handleLoginSubmit = (e) => {
         e.preventDefault(); setLoginError('');
         if (!(employeeIdInput || '').trim()) { setLoginError('社員番号を入力してください。'); return; }
@@ -384,9 +407,7 @@
 
       const handleResetRequestSubmit = (e) => {
         e.preventDefault(); setLoginError('');
-
-        if (dbUsers.length === 0) { setLoginError('接続中です。少々お待ちください。'); return; }
-
+        if (dbUsers.length === 0) { setLoginError('システム準備中です。3秒ほど待ってからもう一度お試しください。'); return; }
         if (!(resetIdInput || '').trim()) { setLoginError('社員番号を入力してください。'); return; }
         if (!(resetEmailInput || '').trim()) { setLoginError('メールアドレスを入力してください。'); return; }
 
@@ -606,7 +627,8 @@
         const safeName = newStaff.name || '名称未設定';
         const newUser = { 
           employeeId: newStaff.employeeId, id: newId, name: safeName, email: newStaff.email, 
-          role: newStaff.isAdmin ? 'admin' : 'staff', status: 'active', password: newStaff.employeeId,
+          role: newStaff.isAdmin ? 'admin' : 'staff', status: 'active', 
+          password: "'" + newStaff.employeeId, // 💡 文字列として保存するために ' を付ける
           employmentCategory: newStaff.employmentCategory
         };
 
@@ -682,10 +704,12 @@
 
         const subject = encodeURIComponent(generateMailText(mailForm.type)); const body = encodeURIComponent(mailForm.text);
         let mailtoLink = emails.length === 1 ? `mailto:${emails[0]}?subject=${subject}&body=${body}` : `mailto:?bcc=${emails.join(',')}&subject=${subject}&body=${body}`;
-        const link = document.createElement('a'); link.href = mailtoLink; link.target = '_top'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        
+        // 💡 確実にメーラーを起動させるように変更
+        window.location.href = mailtoLink;
 
         setIsLoading(true);
-        const mailRecord = { id: `m_${Date.now()}`, type: generateMailText(mailForm.type), text: mailForm.text, date: new Date().toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute:'2-digit' }), targetNames: targetStaff.map(u => getDisplayName(u.name)).join(', ') };
+        const mailRecord = { id: `m_${Date.now()}`, type: generateMailText(mailForm.type), text: mailForm.text, date: new Date().toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute:'2-digit' }), targetNames: targetStaff.map(u => getDisplayName(u.name)).join(', '), readBy: [] };
 
         fetchGAS('saveRecord', 'mailHistory', 'id', mailRecord)
           .then(() => {
@@ -964,22 +988,36 @@
                   </div>
                 )}
 
-                {staffMails[safeUserId]?.length > 0 && (
-                  <div className="space-y-3">
-                    {staffMails[safeUserId].map(mail => (
-                      <div key={mail.id} className="bg-blue-50 border border-blue-200 rounded-md p-4 shadow-sm relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
-                        <div className="flex gap-3">
-                          <Icon name="envelope" size={24} className="text-blue-500 shrink-0 mt-0.5" />
-                          <div className="w-full">
-                            <div className="flex justify-between items-center mb-1"><p className="text-sm font-bold text-blue-800">【{mail.type}】</p><span className="text-xs text-gray-500">{mail.date}</span></div>
-                            <p className="text-base text-gray-800 leading-relaxed whitespace-pre-wrap">{renderTextWithLink(mail.text)}</p>
+                {/* 💡 最新の未読メール1件だけを表示する部分 */}
+                {staffMails[safeUserId]?.length > 0 && (() => {
+                  const unreadMails = staffMails[safeUserId].filter(mail => {
+                    const readList = mail.readBy ? (typeof mail.readBy === 'string' ? JSON.parse(mail.readBy) : mail.readBy) : [];
+                    return !readList.includes(safeUserId);
+                  });
+                  if (unreadMails.length === 0) return null;
+                  const latestMail = unreadMails[0];
+                  
+                  return (
+                    <div className="bg-blue-50 border border-blue-200 rounded-md p-4 shadow-sm relative overflow-hidden mb-3 animate-fade-in-down">
+                      <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                      <div className="flex gap-3">
+                        <Icon name="envelope" size={24} className="text-blue-500 shrink-0 mt-0.5" />
+                        <div className="w-full">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <p className="text-sm font-bold text-blue-800">【{latestMail.type}】</p>
+                              <span className="text-xs text-gray-500">{latestMail.date}</span>
+                            </div>
+                            <button onClick={() => markMailAsRead(latestMail)} className="text-xs bg-white border border-blue-300 text-blue-600 px-3 py-1.5 rounded-md font-bold hover:bg-blue-100 shadow-sm flex items-center gap-1 shrink-0 transition-colors">
+                              <Icon name="check" size={10} /> 確認しました
+                            </button>
                           </div>
+                          <p className="text-base text-gray-800 leading-relaxed whitespace-pre-wrap">{renderTextWithLink(latestMail.text)}</p>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  );
+                })()}
 
                 {personalNotes[safeUserId] && isActiveMonth && (
                   <div className="sticky top-[64px] sm:top-[76px] z-[70] bg-indigo-50 border border-indigo-200 rounded-md p-4 shadow-md relative overflow-hidden">
@@ -1329,9 +1367,9 @@
                       </h2>
                       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                         <button onClick={handleExportCSV} className="bg-emerald-600 rounded-md hover:bg-emerald-700 text-white font-bold py-2 px-4 text-sm shadow-sm flex items-center justify-center gap-2"><Icon name="file-excel" /> Excel出力 (CSV)</button>
-                        <div className="flex bg-gray-100 rounded-md p-1.5 border w-full sm:w-auto">
-                          <button onClick={() => setShiftViewMode('month')} className={`flex-1 rounded-md flex justify-center items-center gap-2 px-4 py-2 text-sm font-bold ${shiftViewMode === 'month' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="th" /> 月間</button>
-                          <button onClick={() => setShiftViewMode('day')} className={`flex-1 rounded-md flex justify-center items-center gap-2 px-4 py-2 text-sm font-bold ${shiftViewMode === 'day' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="align-left" /> 日別</button>
+                        <div className="flex flex-nowrap bg-gray-100 rounded-md p-1.5 border w-full sm:w-auto overflow-x-auto no-scrollbar shrink-0">
+                          <button onClick={() => setShiftViewMode('month')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'month' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="th" /> 月間</button>
+                          <button onClick={() => setShiftViewMode('day')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'day' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="align-left" /> 日別</button>
                         </div>
                       </div>
                     </div>
@@ -1594,7 +1632,7 @@
                         <div><label className="block text-sm font-bold text-gray-700 mb-1.5">メールアドレス</label><input type="email" required value={newStaff.email} onChange={e => setNewStaff({...newStaff, email: e.target.value})} className="w-full rounded-md border p-3" /></div>
                         <div>
                           <label className="block text-sm font-bold text-gray-700 mb-1.5">雇用区分</label>
-                          <input type="text" placeholder="例：A契約、Type4..." value={newStaff.employmentCategory} onChange={(e) => setNewStaff({ ...newStaff, employmentCategory: e.target.value })} className="w-full rounded-md border p-3" />
+                          <input type="text" placeholder="例：アルバイト、正社員" value={newStaff.employmentCategory} onChange={(e) => setNewStaff({ ...newStaff, employmentCategory: e.target.value })} className="w-full rounded-md border p-3" />
                         </div>
                         <div>
                           <label className="flex items-center gap-2 mt-1"><input type="checkbox" checked={newStaff.isAdmin} onChange={e => setNewStaff({...newStaff, isAdmin: e.target.checked})} className="w-4 h-4 accent-indigo-600" /><span className="text-sm font-bold text-gray-700">管理者権限を付与</span></label>
@@ -1645,8 +1683,9 @@
                                     <div className="flex justify-center gap-2">
                                       {!isRetired && (<div className="tooltip-container"><button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`w-10 h-10 flex justify-center items-center rounded-md border ${personalNotes[user.id] ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-50 text-gray-500'}`}><Icon name="comment-dots" size={18} /></button><span className="tooltip-text">個人宛メッセージ</span></div>)}
                                       {!isRetired && (<div className="tooltip-container"><button onClick={() => openFixedShiftForm(user)} className="w-10 h-10 flex justify-center items-center bg-emerald-50 text-emerald-600 border rounded-md"><Icon name="calendar-day" size={18} /></button><span className="tooltip-text">曜日固定シフト</span></div>)}
-                                      <div className="tooltip-container"><button onClick={() => toggleStaffStatus(user.id, user.name, user.status)} className={`w-10 h-10 flex justify-center items-center rounded-md border ${isRetired ? 'bg-indigo-50 text-indigo-600' : 'bg-orange-50 text-orange-600'}`}><Icon name={isRetired ? 'user-check' : 'door-open'} size={18} /></button><span className="tooltip-text">{isRetired ? '復職' : '退職'}</span></div>
-                                      <div className="tooltip-container"><button onClick={() => handleDeleteStaff(user.id, user.name)} className="w-10 h-10 flex justify-center items-center text-red-500 hover:bg-red-50 rounded-md"><Icon name="trash" size={18} /></button><span className="tooltip-text">削除</span></div>
+                                      {/* 💡 ボタンのクリックが確実に機能するように修正 */}
+                                      <div className="tooltip-container"><button type="button" onClick={(e) => { e.stopPropagation(); toggleStaffStatus(user.id, user.name, user.status); }} className={`w-10 h-10 flex justify-center items-center rounded-md border transition-colors ${isRetired ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-orange-50 text-orange-600 hover:bg-orange-100'}`}><Icon name={isRetired ? 'user-check' : 'door-open'} size={18} /></button><span className="tooltip-text">{isRetired ? '復職' : '退職'}</span></div>
+                                      <div className="tooltip-container"><button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteStaff(user.id, user.name); }} className="w-10 h-10 flex justify-center items-center text-red-500 hover:bg-red-50 border border-transparent hover:border-red-200 rounded-md transition-colors"><Icon name="trash" size={18} /></button><span className="tooltip-text">削除</span></div>
                                     </div>
                                   </td>
                                 </tr>
@@ -1719,10 +1758,10 @@
                       return (
                         <div key={dow} className={`flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3 p-1.5 sm:px-4 sm:py-2 ${isWorking ? 'bg-blue-50/20' : isRest && shiftData.canWorkIfNeeded ? 'bg-orange-50/20' : 'bg-white'}`}>
                           <div className="w-full sm:w-16 shrink-0"><span className={`text-lg font-black ${DOW_COLORS[dow]}`}>{DOW_NAMES[dow]}曜</span></div>
-                          <div className="grid grid-cols-3 sm:flex sm:gap-2 w-full sm:w-auto">
-                            <button onClick={() => updateFixedShiftForm(dow, 'status', '未')} className={`py-1 sm:py-1.5 rounded-md font-bold border ${shiftData.status === '未' ? 'bg-gray-600 text-white' : 'bg-white text-gray-500'}`}>未</button>
-                            <button onClick={() => updateFixedShiftForm(dow, 'status', '休')} className={`py-1 sm:py-1.5 rounded-md font-bold border ${shiftData.status === '休' ? 'bg-red-500 text-white' : 'bg-white text-gray-700'}`}>休</button>
-                            <button onClick={() => updateFixedShiftForm(dow, 'status', '勤務')} className={`py-1 sm:py-1.5 rounded-md font-bold border ${isWorking ? 'bg-blue-600 text-white' : 'bg-white text-blue-700'}`}>勤務</button>
+                          <div className="grid grid-cols-3 gap-1 sm:flex sm:gap-2 w-full sm:w-auto">
+                            <button onClick={() => updateFixedShiftForm(dow, 'status', '未')} className={`w-full sm:w-16 py-1 sm:py-1.5 rounded-md font-bold border ${shiftData.status === '未' ? 'bg-gray-600 text-white' : 'bg-white text-gray-500'}`}>未</button>
+                            <button onClick={() => updateFixedShiftForm(dow, 'status', '休')} className={`w-full sm:w-16 py-1 sm:py-1.5 rounded-md font-bold border ${shiftData.status === '休' ? 'bg-red-500 text-white' : 'bg-white text-gray-700'}`}>休</button>
+                            <button onClick={() => updateFixedShiftForm(dow, 'status', '勤務')} className={`w-full sm:w-16 py-1 sm:py-1.5 rounded-md font-bold border ${isWorking ? 'bg-blue-600 text-white' : 'bg-white text-blue-700'}`}>勤務</button>
                           </div>
                           {(isWorking || (isRest && shiftData.canWorkIfNeeded)) && (
                             <div className="flex items-center gap-1.5 sm:ml-auto">
