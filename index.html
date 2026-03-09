@@ -67,18 +67,24 @@
     };
 
     function App() {
-      // =========================================================
-      // ★ここにGASでデプロイした「ウェブアプリのURL」を貼り付けてください！
-      // =========================================================
       const GAS_URL = "https://script.google.com/macros/s/AKfycbwYFWovMf9RkZZvO6nQhjuk3dCFJodT9NnXgYubU7EVwhT9b1azb1pOK3xOJTx0vQIo/exec";
 
+      // 💡 エラーの原因をあぶり出すように強化した通信機能
       const fetchGAS = (action, ...args) => {
         return fetch(GAS_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
           body: JSON.stringify({ action, args })
         })
-        .then(response => response.json())
+        .then(async response => {
+          const text = await response.text();
+          try {
+            return JSON.parse(text);
+          } catch (e) {
+            console.error("【GASからの返答内容】\n", text);
+            throw new Error("Googleのセキュリティによってブロックされています（F12キーのConsoleを確認してください）");
+          }
+        })
         .then(data => {
           if (data.error || data.success === false) throw new Error(data.message || '通信エラー');
           return data;
@@ -129,7 +135,6 @@
       const [shiftViewMode, setShiftViewMode] = useState('month');
       const [selectedDay, setSelectedDay] = useState(1);
       
-      // ★雇用区分（employmentCategory）と検索Stateを追加
       const [newStaff, setNewStaff] = useState({ employeeId: '', name: '', email: '', isAdmin: false, employmentCategory: '' });
       const [staffSearchQuery, setStaffSearchQuery] = useState(''); 
       const [shiftSearchQuery, setShiftSearchQuery] = useState('');
@@ -186,7 +191,6 @@
         return rows;
       }, [currentYear, currentMonth, daysArray]);
 
-      // 💡 初期データの読み込み処理
       useEffect(() => {
         fetchGAS('getInitialData')
           .then((data) => {
@@ -244,7 +248,6 @@
           });
       }, []);
 
-      // 💡 10分ごとのエコ自動同期
       useEffect(() => {
         const intervalId = setInterval(() => {
           if (!document.hidden) {
@@ -333,6 +336,7 @@
 
       const changeMonth = (offset) => { setDisplayDate(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1)); setSelectedDay(1); setCurrentWeekIndex(0); };
 
+      // 💡 ログイン処理（エラーをそのまま画面に出すように修正）
       const handleLoginSubmit = (e) => {
         e.preventDefault(); setLoginError('');
         if (!(employeeIdInput || '').trim()) { setLoginError('社員番号を入力してください。'); return; }
@@ -346,7 +350,10 @@
               else { loginSuccess(result.user); }
             } else { setLoginError(result.message); }
           })
-          .catch(() => { setIsLoading(false); setLoginError('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); });
+          .catch((error) => { 
+            setIsLoading(false); 
+            setLoginError(`エラー: ${error.message}`); 
+          });
       };
 
       const validatePassword = (pw) => {
@@ -381,7 +388,6 @@
         if (!(resetEmailInput || '').trim()) { setLoginError('メールアドレスを入力してください。'); return; }
 
         setIsLoading(true);
-        // 仮の本人確認（実際はメール認証等が必要ですが、モックとして残します）
         setTimeout(() => {
           const user = dbUsers.find(u => u.employeeId === resetIdInput);
           if (user && user.email === resetEmailInput) {
@@ -894,7 +900,6 @@
 
       if (!currentUser) return null;
 
-      // 💡 絞り込みロジック
       const pendingApprovalCount = changeRequests.filter(req => req.status === 'pending').length;
       const unreadNotificationCount = adminNotifications.filter(n => !n.read).length;
 
@@ -1327,20 +1332,6 @@
                         </div>
                       </div>
                     </div>
-
-                    {(activeTab === 'shifts' || activeTab === 'daily') && (
-                      <div className="mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-3 sm:p-4 rounded-lg shadow-sm border border-gray-200 mt-4">
-                        <div className="flex items-center gap-2 sm:gap-4">
-                          <button onClick={() => changeMonth(-1)} className="w-8 h-8 sm:w-10 sm:h-10 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600"><Icon name="chevron-left" /></button>
-                          <h2 className="text-lg sm:text-xl font-bold text-gray-800 w-24 sm:w-32 text-center">{currentYear}年 {currentMonth}月</h2>
-                          <button onClick={() => changeMonth(1)} className="w-8 h-8 sm:w-10 sm:h-10 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600"><Icon name="chevron-right" /></button>
-                        </div>
-                        <div className="relative w-full sm:w-64">
-                           <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400"><Icon name="search" /></span>
-                           <input type="text" placeholder="スタッフ・雇用区分で絞り込み..." value={shiftSearchQuery} onChange={(e) => setShiftSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none" />
-                        </div>
-                      </div>
-                    )}
 
                     {shiftViewMode === 'month' && (
                       <div className="bg-white rounded-md shadow-sm border overflow-x-auto no-scrollbar pt-4 pb-24 mt-2">
@@ -1842,6 +1833,3 @@
   </script>
 </body>
 </html>
-
-
-
