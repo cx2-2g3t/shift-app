@@ -1591,7 +1591,7 @@
                         <div><label className="block text-sm font-bold text-gray-700 mb-1.5">メールアドレス</label><input type="email" required value={newStaff.email} onChange={e => setNewStaff({...newStaff, email: e.target.value})} className="w-full rounded-md border p-3" /></div>
                         <div>
                           <label className="block text-sm font-bold text-gray-700 mb-1.5">雇用区分</label>
-                          <input type="text" placeholder="例：アルバイト、正社員" value={newStaff.employmentCategory} onChange={(e) => setNewStaff({ ...newStaff, employmentCategory: e.target.value })} className="w-full rounded-md border p-3" />
+                          <input type="text" placeholder="例：A契約、Type4..." value={newStaff.employmentCategory} onChange={(e) => setNewStaff({ ...newStaff, employmentCategory: e.target.value })} className="w-full rounded-md border p-3" />
                         </div>
                         <div>
                           <label className="flex items-center gap-2 mt-1"><input type="checkbox" checked={newStaff.isAdmin} onChange={e => setNewStaff({...newStaff, isAdmin: e.target.checked})} className="w-4 h-4 accent-indigo-600" /><span className="text-sm font-bold text-gray-700">管理者権限を付与</span></label>
@@ -1833,3 +1833,4 @@
   </script>
 </body>
 </html>
+
