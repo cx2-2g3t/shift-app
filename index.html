@@ -70,7 +70,7 @@
       // =========================================================
       // ★ここに新しく発行したGASのウェブアプリURLを貼り付けてください！
       // =========================================================
-      const GAS_URL = "https://script.google.com/macros/s/AKfycbyjCN5SO-HilpcVO_AH89IfGcCqKSEd9omAYJswzfZZyDoYAduOLS1WmGaFkGluvb3u/exec";
+      const GAS_URL = "https://script.google.com/macros/s/AKfycbxbzJxiBjROBm8EUXIYVckjhNnN4QhGqrtr_MCC8ndjLrEzJTiX6qp8FJE1_5QjM1WJ/exec";
 
       const fetchGAS = (action, ...args) => {
         return fetch(GAS_URL, {
@@ -124,8 +124,8 @@
       const [isConfirmed, setIsConfirmed] = useState(false);
       
       const [dbUsers, setDbUsers] = useState([]);
-      const [shifts, setShifts] = useState({});
-      const [submissionStatus, setSubmissionStatus] = useState({});
+      const [shifts, setShifts] = useState({}); // 💡構造を { month: { userId: data } } に変更
+      const [submissionStatus, setSubmissionStatus] = useState({}); // 💡構造を { month: { userId: status } } に変更
       const [dailyNotes, setDailyNotes] = useState({});
       const [personalNotes, setPersonalNotes] = useState({});
       const [adminNotifications, setAdminNotifications] = useState([]);
@@ -166,6 +166,13 @@
       const currentYear = displayDate.getFullYear();
       const currentMonth = displayDate.getMonth() + 1;
       const currentMonthStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+      
+      // 💡 現在表示中の月のデータと、募集中の月のデータを変数として切り出し
+      const currentMonthShifts = shifts[currentMonthStr] || {};
+      const currentMonthStatus = submissionStatus[currentMonthStr] || {};
+      const activeMonthShifts = shifts[activeTargetMonth] || {};
+      const activeMonthStatus = submissionStatus[activeTargetMonth] || {};
+
       const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
       const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
@@ -179,24 +186,18 @@
 
       const myPendingDays = safeUserId ? (pendingChanges[safeUserId] || {}) : {};
       const hasPending = Object.keys(myPendingDays).length > 0;
-      const myStatus = safeUserId ? (submissionStatus[safeUserId] || '未提出') : '未提出';
+      const myStatus = safeUserId ? (activeMonthStatus[safeUserId] || '未提出') : '未提出';
 
-      // 💡 データベースと連動して既読状態を記録する機能
       const markMailAsRead = (mail) => {
-        // readByを配列として取得
         const newReadBy = mail.readBy ? (typeof mail.readBy === 'string' ? JSON.parse(mail.readBy) : mail.readBy) : [];
         if (!newReadBy.includes(safeUserId)) {
           newReadBy.push(safeUserId);
           const updatedMail = { ...mail, readBy: newReadBy };
-          
-          // 画面に即座に反映して消す
           setSentMails(prev => prev.map(m => m.id === mail.id ? updatedMail : m));
           setStaffMails(prev => {
             const updatedUserMails = (prev[safeUserId] || []).map(m => m.id === mail.id ? updatedMail : m);
             return { ...prev, [safeUserId]: updatedUserMails };
           });
-
-          // バックエンド（GAS）に保存して別端末にも同期
           fetchGAS('saveRecord', 'mailHistory', 'id', updatedMail).catch(e => console.error("既読保存エラー", e));
         }
       };
@@ -226,18 +227,19 @@
             const isConfirmedObj = settings.find(s => s.key === 'isConfirmed');
             if (isConfirmedObj) setIsConfirmed(isConfirmedObj.value === 'true');
 
+            // 💡 月ごとにデータを分けて保存するように修正
             const shiftsState = {}; const statusState = {};
             (data.shifts || []).forEach(row => {
-              if (row.month === currentMon) {
-                shiftsState[row.userId] = typeof row.shiftData === 'string' ? JSON.parse(row.shiftData) : row.shiftData;
-                statusState[row.userId] = row.status;
-              }
+              if (!shiftsState[row.month]) shiftsState[row.month] = {};
+              if (!statusState[row.month]) statusState[row.month] = {};
+              shiftsState[row.month][row.userId] = typeof row.shiftData === 'string' ? JSON.parse(row.shiftData) : row.shiftData;
+              statusState[row.month][row.userId] = row.status;
             });
             setShifts(shiftsState); setSubmissionStatus(statusState);
 
             const dailyNotesState = {};
             (data.dailyNotes || []).forEach(row => {
-              if (row.dateKey && row.dateKey.startsWith(currentMon)) {
+              if (row.dateKey && row.dateKey.startsWith(currentMonthStr)) {
                 dailyNotesState[parseInt(row.dateKey.split('-')[2], 10)] = row.note;
               }
             });
@@ -270,7 +272,7 @@
             console.log("データの読み込みを行っています...");
             setIsLoading(false);
           });
-      }, []);
+      }, [currentMonthStr]); // 💡 月を切り替えた時に再計算されるように追加
 
       useEffect(() => {
         const intervalId = setInterval(() => {
@@ -335,7 +337,7 @@
         let confirmed = 0, possible = 0;
         staffUsers.forEach(u => {
           if (u.status === 'retired') return; 
-          const s = shifts[u.id]?.[day]; if (!s) return;
+          const s = currentMonthShifts[u.id]?.[day]; if (!s) return;
           if (s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded)) {
             const details = calculateShiftDetails(s.start, s.end); if (details.hours === 0) return;
             let isWorkingThisHour = (details.startVal <= hour && details.endVal > hour);
@@ -349,7 +351,7 @@
       const getDailySummary = (day) => {
         let confirmed = 0; let possible = 0; let totalHours = 0;
         staffUsers.filter(u => u.status === 'active').forEach(u => {
-          const s = shifts[u.id]?.[day];
+          const s = currentMonthShifts[u.id]?.[day];
           if (s) {
             if (s.status === '勤務') { confirmed++; const details = calculateShiftDetails(s.start, s.end); totalHours += details.hours; }
             else if (s.status === '休' && s.canWorkIfNeeded) { possible++; }
@@ -369,11 +371,12 @@
           .then((result) => {
             setIsLoading(false);
             if (result.success) {
-              if (result.isInitial) {
+              if (result.isInitial) { 
                 setTempUser(result.user); 
-                setPasswordInput('');
+                setPasswordInput(''); 
                 setPasswordConfirm('');
-                setLoginStep('change_password'); }
+                setLoginStep('change_password'); 
+              }
               else { loginSuccess(result.user); }
             } else { setLoginError(result.message); }
           })
@@ -418,7 +421,6 @@
         setIsLoading(true);
         const user = dbUsers.find(u => u.employeeId === resetIdInput);
         if (user && user.email === resetEmailInput) {
-          
           const resetPasswordStr = "'" + user.employeeId;
           const updatedUser = { ...user, password: resetPasswordStr };
 
@@ -426,13 +428,12 @@
             .then(() => {
               setIsLoading(false);
               showToast('パスワードを初期化しました。初期パスワード（社員番号）でログインしてください。');
-              goBackToLogin(); // ログイン画面に戻す
+              goBackToLogin();
             })
             .catch(() => {
               setIsLoading(false);
               setLoginError('システムエラーが発生しました。通信環境をご確認ください。');
             });
-            
         } else { 
           setIsLoading(false);
           setLoginError('入力された情報が登録内容と一致しません。'); 
@@ -455,28 +456,29 @@
       const updateLocalShift = (day, field, value) => {
         if (!currentUser) return;
         setShifts(prev => {
-          const uShifts = prev[currentUser.id] || {};
+          const monthShifts = prev[currentMonthStr] || {};
+          const uShifts = monthShifts[currentUser.id] || {};
           const cShift = uShifts[day] || { status: '未', start: DEFAULT_START_TIME, end: DEFAULT_END_TIME, canWorkIfNeeded: false, note: '' };
-          return { ...prev, [currentUser.id]: { ...uShifts, [day]: { ...cShift, [field]: value } } };
+          return { ...prev, [currentMonthStr]: { ...monthShifts, [currentUser.id]: { ...uShifts, [day]: { ...cShift, [field]: value } } } };
         });
       };
 
       const handleSubmitShift = (isSubmit = false) => {
         if (isSubmit && currentUser) {
-          const currentShifts = shifts[currentUser.id] || {};
-          const hasUnentered = daysArray.some(day => !currentShifts[day] || currentShifts[day].status === '未');
+          const currentShiftsForSubmit = activeMonthShifts[currentUser.id] || {};
+          const hasUnentered = daysArray.some(day => !currentShiftsForSubmit[day] || currentShiftsForSubmit[day].status === '未');
           if (hasUnentered) { setConfirmModal({ isOpen: true, title: '未入力エラー', message: '未入力の日付があります。すべて選択してから提出してください。', isAlert: true, onConfirm: null }); return; }
-          const hasMissingTime = daysArray.some(day => { const s = currentShifts[day]; return (s && s.status === '勤務') ? (!s.start || !s.end) : false; });
+          const hasMissingTime = daysArray.some(day => { const s = currentShiftsForSubmit[day]; return (s && s.status === '勤務') ? (!s.start || !s.end) : false; });
           if (hasMissingTime) { setConfirmModal({ isOpen: true, title: '時間未入力エラー', message: '「勤務」の日は、出勤時間と退勤時間の両方を選択してください。', isAlert: true, onConfirm: null }); return; }
         }
         
         setIsLoading(true);
         const statusToSave = isSubmit ? '提出済' : '途中保存';
-        const record = { recordId: `${currentUser.id}_${activeTargetMonth}`, userId: currentUser.id, month: activeTargetMonth, status: statusToSave, shiftData: shifts[currentUser.id] || {} };
+        const record = { recordId: `${currentUser.id}_${activeTargetMonth}`, userId: currentUser.id, month: activeTargetMonth, status: statusToSave, shiftData: activeMonthShifts[currentUser.id] || {} };
 
         fetchGAS('saveRecord', 'shifts', 'recordId', record)
           .then(() => {
-            setSubmissionStatus(prev => ({ ...prev, [currentUser.id]: statusToSave }));
+            setSubmissionStatus(prev => ({ ...prev, [activeTargetMonth]: { ...(prev[activeTargetMonth] || {}), [currentUser.id]: statusToSave } }));
             setConfirmModal({ isOpen: true, title: '処理完了', message: isSubmit ? 'シフトの提出が完了しました。' : 'シフトを一時保存しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
@@ -486,13 +488,13 @@
       const handleChangeFormDay = (dayStr) => {
         const day = parseInt(dayStr);
         if (!currentUser) return;
-        const currentShift = (shifts[currentUser.id] || {})[day] || { status: '未', start: DEFAULT_START_TIME, end: DEFAULT_END_TIME, canWorkIfNeeded: false, note: '' };
+        const currentShift = (currentMonthShifts[currentUser.id] || {})[day] || { status: '未', start: DEFAULT_START_TIME, end: DEFAULT_END_TIME, canWorkIfNeeded: false, note: '' };
         setChangeForm(prev => ({ ...prev, day, status: currentShift.status === '未' ? '勤務' : currentShift.status, start: currentShift.start || DEFAULT_START_TIME, end: currentShift.end || DEFAULT_END_TIME, canWorkIfNeeded: currentShift.canWorkIfNeeded || false, note: currentShift.note || '' }));
       };
 
       const openChangeForm = () => {
         if (!safeUserId) return;
-        const initialDay = 1; const currentShift = (shifts[safeUserId] || {})[initialDay] || { status: '未', start: DEFAULT_START_TIME, end: DEFAULT_END_TIME, canWorkIfNeeded: false, note: '' };
+        const initialDay = 1; const currentShift = (currentMonthShifts[safeUserId] || {})[initialDay] || { status: '未', start: DEFAULT_START_TIME, end: DEFAULT_END_TIME, canWorkIfNeeded: false, note: '' };
         setChangeForm({ isOpen: true, day: initialDay, status: currentShift.status === '未' ? '勤務' : currentShift.status, start: currentShift.start || DEFAULT_START_TIME, end: currentShift.end || DEFAULT_END_TIME, canWorkIfNeeded: currentShift.canWorkIfNeeded || false, note: currentShift.note || '', reason: '', changeCategory: '', confirmedBy: '' });
       };
 
@@ -503,10 +505,11 @@
         if (!(changeForm.reason || '').trim()) { showToast('変更理由を入力してください', 'error'); return; }
 
         setIsLoading(true);
-        const original = (shifts[currentUser.id] || {})[changeForm.day] || { status: '未' };
+        const original = (currentMonthShifts[currentUser.id] || {})[changeForm.day] || { status: '未' };
         const newVal = { status: changeForm.status, start: changeForm.start, end: changeForm.end, canWorkIfNeeded: changeForm.canWorkIfNeeded, note: changeForm.note, changeCategory: changeForm.changeCategory };
         const newReq = { 
           id: `req_${Date.now()}`, userId: currentUser.id, userName: getDisplayName(currentUser.name), 
+          targetMonth: currentMonthStr,
           changes: [{ day: changeForm.day, oldVal: original, newVal }], 
           day: changeForm.day, oldVal: original, newVal: newVal, reason: changeForm.reason, status: 'pending', 
           createdAt: new Date().toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute:'2-digit' }), confirmedBy: changeForm.confirmedBy, processedBy: null
@@ -536,14 +539,15 @@
           changes: req.changes.map(c => ({ ...c, newVal: { ...c.newVal, changeCategory: category, attendanceStatus: attStatus } })) 
         };
 
-        const updatedShiftsForUser = { ...(shifts[req.userId] || {}) };
+        const targetMon = req.targetMonth || activeTargetMonth; 
+        const updatedShiftsForUser = { ...((shifts[targetMon] || {})[req.userId] || {}) };
         updatedReq.changes.forEach(c => { updatedShiftsForUser[c.day] = c.newVal; });
-        const shiftRecord = { recordId: `${req.userId}_${activeTargetMonth}`, userId: req.userId, month: activeTargetMonth, status: submissionStatus[req.userId] || '提出済', shiftData: updatedShiftsForUser };
+        const shiftRecord = { recordId: `${req.userId}_${targetMon}`, userId: req.userId, month: targetMon, status: (submissionStatus[targetMon] || {})[req.userId] || '提出済', shiftData: updatedShiftsForUser };
 
         fetchGAS('saveRecord', 'changeRequests', 'id', updatedReq)
           .then(() => fetchGAS('saveRecord', 'shifts', 'recordId', shiftRecord))
           .then(() => {
-            setShifts(prev => ({ ...prev, [req.userId]: updatedShiftsForUser }));
+            setShifts(prev => ({ ...prev, [targetMon]: { ...(prev[targetMon] || {}), [req.userId]: updatedShiftsForUser } }));
             setPendingChanges(prev => { const uPending = { ...(prev[req.userId] || {}) }; updatedReq.changes.forEach(c => delete uPending[c.day]); return { ...prev, [req.userId]: uPending }; });
             setChangeRequests(prev => prev.map(r => r.id === reqId ? updatedReq : r));
             setApprovalChecks(prev => { const newChecks = { ...prev }; delete newChecks[reqId]; return newChecks; });
@@ -611,7 +615,7 @@
         const isDaily = modal.type === 'daily';
         const sheetName = isDaily ? 'dailyNotes' : 'personalNotes';
         const keyColumn = isDaily ? 'dateKey' : 'userId';
-        const saveKey = isDaily ? `${activeTargetMonth}-${String(modal.targetId).padStart(2, '0')}` : modal.targetId;
+        const saveKey = isDaily ? `${currentMonthStr}-${String(modal.targetId).padStart(2, '0')}` : modal.targetId;
         const record = { [keyColumn]: saveKey, note: modal.text };
 
         fetchGAS('saveRecord', sheetName, keyColumn, record)
@@ -643,13 +647,15 @@
         const newUser = { 
           employeeId: newStaff.employeeId, id: newId, name: safeName, email: newStaff.email, 
           role: newStaff.isAdmin ? 'admin' : 'staff', status: 'active', 
-          password: "'" + newStaff.employeeId, // 💡 文字列として保存するために ' を付ける
+          password: "'" + newStaff.employeeId,
           employmentCategory: newStaff.employmentCategory
         };
 
         fetchGAS('saveRecord', 'users', 'id', newUser)
           .then(() => {
-            setDbUsers([...dbUsers, newUser]); setSubmissionStatus(prev => ({ ...prev, [newId]: '未提出' })); showToast(`${safeName} さんを追加しました`);
+            setDbUsers([...dbUsers, newUser]); 
+            setSubmissionStatus(prev => ({ ...prev, [activeTargetMonth]: { ...(prev[activeTargetMonth] || {}), [newId]: '未提出' } })); 
+            showToast(`${safeName} さんを追加しました`);
             setNewStaff({ employeeId: '', name: '', email: '', isAdmin: false, employmentCategory: '' }); setIsLoading(false);
           }).catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
       };
@@ -678,7 +684,7 @@
         let csv = "社員番号,名前,雇用区分,日付,ステータス,出勤,退勤,備考\n";
         staffUsers.filter(u => u.status === 'active').forEach(u => {
           daysArray.forEach(d => {
-            const s = shifts[u.id]?.[d] || { status: '未' };
+            const s = currentMonthShifts[u.id]?.[d] || { status: '未' };
             csv += `${u.employeeId},${getDisplayName(u.name)},${u.employmentCategory||''},${currentMonth}/${d},${s.status},${s.start || ''},${s.end || ''},${s.note || ''}\n`;
           });
         });
@@ -696,8 +702,8 @@
       const handleTargetModeChange = (e) => {
         const mode = e.target.value; let selected = [];
         if (mode === 'all') { selected = staffUsers.filter(u => u.status === 'active').map(u => u.id); } 
-        else if (mode === 'unsubmitted') { selected = staffUsers.filter(u => u.status === 'active' && submissionStatus[u.id] !== '提出済').map(u => u.id); } 
-        else if (mode === 'submitted') { selected = staffUsers.filter(u => u.status === 'active' && submissionStatus[u.id] === '提出済').map(u => u.id); } 
+        else if (mode === 'unsubmitted') { selected = staffUsers.filter(u => u.status === 'active' && activeMonthStatus[u.id] !== '提出済').map(u => u.id); } 
+        else if (mode === 'submitted') { selected = staffUsers.filter(u => u.status === 'active' && activeMonthStatus[u.id] === '提出済').map(u => u.id); } 
         else { selected = [...mailForm.selectedUsers]; }
         setMailForm({ ...mailForm, targetMode: mode, selectedUsers: selected });
       };
@@ -720,7 +726,6 @@
         const subject = encodeURIComponent(generateMailText(mailForm.type)); const body = encodeURIComponent(mailForm.text);
         let mailtoLink = emails.length === 1 ? `mailto:${emails[0]}?subject=${subject}&body=${body}` : `mailto:?bcc=${emails.join(',')}&subject=${subject}&body=${body}`;
         
-        // 💡 確実にメーラーを起動させるように変更
         window.location.href = mailtoLink;
 
         setIsLoading(true);
@@ -778,18 +783,23 @@
       const applyFixedShiftsToMonth = () => {
         setConfirmModal({ isOpen: true, title: '一括自動入力の確認', message: `固定シフトを未入力の日に反映します。よろしいですか？`, isAlert: false, onConfirm: () => {
           setIsLoading(true);
-          const newShifts = { ...shifts }; const updatePromises = [];
+          const newShifts = { ...shifts }; 
+          if (!newShifts[activeTargetMonth]) newShifts[activeTargetMonth] = {};
+          const updatePromises = [];
+          
           staffUsers.forEach(u => {
-            if (!newShifts[u.id]) newShifts[u.id] = {};
+            if (!newShifts[activeTargetMonth][u.id]) newShifts[activeTargetMonth][u.id] = {};
             const uFixed = fixedShifts[u.id]; let hasChanged = false;
             if (uFixed) {
               daysArray.forEach(day => {
-                const dow = new Date(currentYear, currentMonth - 1, day).getDay();
-                if ((!newShifts[u.id][day] || newShifts[u.id][day].status === '未') && (uFixed[dow] && uFixed[dow].status !== '未')) { newShifts[u.id][day] = { ...uFixed[dow] }; hasChanged = true; }
+                const dow = new Date(targetYear, targetMonth - 1, day).getDay();
+                if ((!newShifts[activeTargetMonth][u.id][day] || newShifts[activeTargetMonth][u.id][day].status === '未') && (uFixed[dow] && uFixed[dow].status !== '未')) { 
+                  newShifts[activeTargetMonth][u.id][day] = { ...uFixed[dow] }; hasChanged = true; 
+                }
               });
             }
             if (hasChanged) {
-               const record = { recordId: `${u.id}_${activeTargetMonth}`, userId: u.id, month: activeTargetMonth, status: submissionStatus[u.id] || '未提出', shiftData: newShifts[u.id] };
+               const record = { recordId: `${u.id}_${activeTargetMonth}`, userId: u.id, month: activeTargetMonth, status: (submissionStatus[activeTargetMonth] || {})[u.id] || '未提出', shiftData: newShifts[activeTargetMonth][u.id] };
                updatePromises.push(fetchGAS('saveRecord', 'shifts', 'recordId', record));
             }
           });
@@ -928,7 +938,7 @@
                       </div>
                     </div>
                     <div className="pt-4 flex flex-col gap-4">
-                      <button type="submit" className="w-full text-white bg-gradient-to-r from-blue-600 to-indigo-600 font-bold rounded-md px-5 py-4 shadow-md text-lg transform hover:-translate-y-0.5">確認して再設定へ進む</button>
+                      <button type="submit" className="w-full text-white bg-gradient-to-r from-blue-600 to-indigo-600 font-bold rounded-md px-5 py-4 shadow-md text-lg transform hover:-translate-y-0.5">確認して初期化する</button>
                       <button type="button" onClick={goBackToLogin} className="text-gray-400 text-sm font-bold flex justify-center gap-1 mt-2"><Icon name="arrow-left" size={12}/> 戻る</button>
                     </div>
                   </form>
@@ -966,7 +976,7 @@
           {/* スタッフ用コンテンツ */}
           {/* ==================================================== */}
           {view === 'staff' && (() => {
-            const myShifts = safeUserId ? (shifts[safeUserId] || {}) : {};
+            const myShifts = safeUserId ? (currentMonthShifts[safeUserId] || {}) : {};
             const isBaseDisabled = isConfirmed || !isActiveMonth; 
 
             return (
@@ -1003,7 +1013,6 @@
                   </div>
                 )}
 
-                {/* 💡 最新の未読メール1件だけを表示する部分 */}
                 {staffMails[safeUserId]?.length > 0 && (() => {
                   const unreadMails = staffMails[safeUserId].filter(mail => {
                     const readList = mail.readBy ? (typeof mail.readBy === 'string' ? JSON.parse(mail.readBy) : mail.readBy) : [];
@@ -1431,7 +1440,7 @@
                             ) : (
                               filteredShiftUsers.map(user => {
                                 const hasPending = pendingChanges[user.id] && Object.keys(pendingChanges[user.id]).length > 0;
-                                let statusText = submissionStatus[user.id] || '未提出'; let statusColor = 'bg-gray-100 text-gray-600';
+                                let statusText = currentMonthStatus[user.id] || '未提出'; let statusColor = 'bg-gray-100 text-gray-600';
                                 if (statusText === '提出済') statusColor = 'bg-green-100 text-green-700'; else if (statusText === '途中保存') statusColor = 'bg-yellow-100 text-yellow-700';
                                 if (isConfirmed && hasPending) { statusColor = 'bg-orange-100 text-orange-700 border border-orange-200'; statusText = '承認待ち'; }
 
@@ -1448,7 +1457,7 @@
                                       <span className={`text-[10px] rounded-md font-bold px-2 py-0.5 ${statusColor}`}>{statusText}</span>
                                     </td>
                                     {daysArray.map(day => {
-                                      const s = shifts[user.id]?.[day] || { status: '未' };
+                                      const s = currentMonthShifts[user.id]?.[day] || { status: '未' };
                                       const isPendingCell = pendingChanges[user.id]?.[day]; const cellBg = isPendingCell ? 'bg-orange-50 relative' : '';
                                       if (s.status === '休' && !s.canWorkIfNeeded) return <td key={day} colSpan={2} className={`px-2 py-2 text-center border-r-2 align-middle ${isPendingCell ? 'bg-orange-100 relative' : 'bg-red-50/20'}`}>{isPendingCell && <div className="absolute inset-0 border-2 border-orange-400 pointer-events-none"></div>}<span className="text-red-500 font-bold text-lg relative z-10">休</span></td>;
                                       if (s.status === '有休') return <td key={day} colSpan={2} className={`px-2 py-2 text-center border-r-2 align-middle ${isPendingCell ? 'bg-orange-100 relative' : 'bg-teal-50/20'}`}>{isPendingCell && <div className="absolute inset-0 border-2 border-orange-400 pointer-events-none"></div>}<span className="text-teal-600 rounded-md font-bold text-xs bg-teal-50 px-2.5 py-1 border relative z-10">有休</span></td>;
@@ -1528,7 +1537,7 @@
                                 <div className="p-10 text-center text-gray-500 text-base">該当するスタッフがいません</div>
                               ) : (
                                 filteredShiftUsers.map(user => {
-                                  const s = shifts[user.id]?.[selectedDay] || { status: '未' };
+                                  const s = currentMonthShifts[user.id]?.[selectedDay] || { status: '未' };
                                   const isWorking = s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded);
                                   const details = isWorking ? calculateShiftDetails(s.start, s.end) : null;
                                   
@@ -1615,7 +1624,7 @@
                               <tr key={req.id} className="hover:bg-gray-50">
                                 <td className="px-5 py-4 text-sm text-gray-500">{req.createdAt}</td>
                                 <td className="px-5 py-4 font-bold text-gray-800"><Icon name="user" className="mr-2 text-gray-400"/>{req.userName}</td>
-                                <td className="px-5 py-4 font-bold text-indigo-600 text-lg text-center">{req.day}日</td>
+                                <td className="px-5 py-4 font-bold text-indigo-600 text-lg text-center">{req.targetMonth ? `${req.targetMonth.split('-')[1]}/` : ''}{req.day}日</td>
                                 <td className="px-5 py-4 text-center"><span className="bg-gray-100 border text-gray-700 px-3 py-1 text-sm font-bold">{req.newVal?.changeCategory || '-'}</span></td>
                                 <td className="px-5 py-4 text-center"><span className="bg-indigo-50 border text-indigo-700 px-3 py-1 text-sm font-bold">{req.newVal?.attendanceStatus || '-'}</span></td>
                                 <td className="px-5 py-4 align-top"><span className="text-gray-400 line-through bg-gray-50 border px-3 py-1.5 text-sm block w-fit mx-auto">{formatShiftStr(req.oldVal)}</span></td>
@@ -1678,7 +1687,7 @@
                           <tbody className="divide-y">
                             {filteredDbUsers.filter(u => u.employeeId !== '9999').filter(u => showRetired || u.status === 'active').map(user => {
                               const isRetired = user.status === 'retired';
-                              let stText = submissionStatus[user.id] || '未提出'; let stColor = 'bg-gray-100 text-gray-600';
+                              let stText = activeMonthStatus[user.id] || '未提出'; let stColor = 'bg-gray-100 text-gray-600';
                               if (stText === '提出済') stColor = 'bg-green-100 text-green-700'; else if (stText === '途中保存') stColor = 'bg-yellow-100 text-yellow-700';
                               if (isConfirmed && pendingChanges[user.id] && Object.keys(pendingChanges[user.id]).length > 0) { stColor = 'bg-orange-100 text-orange-700 border'; stText = '承認待ち'; }
 
@@ -1698,7 +1707,6 @@
                                     <div className="flex justify-center gap-2">
                                       {!isRetired && (<div className="tooltip-container"><button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`w-10 h-10 flex justify-center items-center rounded-md border ${personalNotes[user.id] ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-50 text-gray-500'}`}><Icon name="comment-dots" size={18} /></button><span className="tooltip-text">個人宛メッセージ</span></div>)}
                                       {!isRetired && (<div className="tooltip-container"><button onClick={() => openFixedShiftForm(user)} className="w-10 h-10 flex justify-center items-center bg-emerald-50 text-emerald-600 border rounded-md"><Icon name="calendar-day" size={18} /></button><span className="tooltip-text">曜日固定シフト</span></div>)}
-                                      {/* 💡 ボタンのクリックが確実に機能するように修正 */}
                                       <div className="tooltip-container"><button type="button" onClick={(e) => { e.stopPropagation(); toggleStaffStatus(user.id, user.name, user.status); }} className={`w-10 h-10 flex justify-center items-center rounded-md border transition-colors ${isRetired ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-orange-50 text-orange-600 hover:bg-orange-100'}`}><Icon name={isRetired ? 'user-check' : 'door-open'} size={18} /></button><span className="tooltip-text">{isRetired ? '復職' : '退職'}</span></div>
                                       <div className="tooltip-container"><button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteStaff(user.id, user.name); }} className="w-10 h-10 flex justify-center items-center text-red-500 hover:bg-red-50 border border-transparent hover:border-red-200 rounded-md transition-colors"><Icon name="trash" size={18} /></button><span className="tooltip-text">削除</span></div>
                                     </div>
@@ -1822,7 +1830,15 @@
                     <label className="block text-sm font-bold text-gray-700 mb-2">宛先</label>
                     <select value={mailForm.targetMode} onChange={handleTargetModeChange} className="w-full border p-3 rounded-md font-bold"><option value="all">全スタッフ</option><option value="unsubmitted">未提出のみ</option><option value="submitted">提出済のみ</option><option value="individual">個別に選択</option></select>
                     {mailForm.targetMode === 'individual' && (
-                      <div className="mt-3 border max-h-40 overflow-y-auto bg-gray-50 divide-y"><label className="flex items-center gap-3 p-3"><input type="checkbox" checked={mailForm.selectedUsers.includes(currentUser.id)} onChange={() => toggleMailUser(currentUser.id)} className="w-4 h-4 accent-blue-600" /><span className="font-bold text-sm">自身へテスト送信</span></label>{staffUsers.filter(u => u.status === 'active').map(u => (<label key={u.id} className="flex items-center gap-3 p-3"><input type="checkbox" checked={mailForm.selectedUsers.includes(u.id)} onChange={() => toggleMailUser(u.id)} className="w-4 h-4 accent-blue-600" /><span className="font-bold text-sm">{getDisplayName(u.name)}</span></label>))}</div>
+                      <div className="mt-3 border max-h-40 overflow-y-auto bg-gray-50 divide-y">
+                        {/* 💡ここにあった「自身へテスト送信」を完全に削除しました */}
+                        {staffUsers.filter(u => u.status === 'active').map(u => (
+                          <label key={u.id} className="flex items-center gap-3 p-3">
+                            <input type="checkbox" checked={mailForm.selectedUsers.includes(u.id)} onChange={() => toggleMailUser(u.id)} className="w-4 h-4 accent-blue-600" />
+                            <span className="font-bold text-sm">{getDisplayName(u.name)}</span>
+                          </label>
+                        ))}
+                      </div>
                     )}
                   </div>
                   <div><label className="block text-sm font-bold text-gray-700 mb-2">種類</label><select value={mailForm.templateId} onChange={e => { const tpl = emailTemplates.find(t => t.id === e.target.value); if(tpl) setMailForm({...mailForm, templateId: tpl.id, type: tpl.name, text: generateMailText(tpl.body)}); }} className="w-full border p-3 rounded-md font-bold">{emailTemplates.map(tpl => <option key={tpl.id} value={tpl.id}>{generateMailText(tpl.name)}</option>)}</select></div>
@@ -1844,12 +1860,7 @@
           )}
 
           {changeForm.isOpen && (() => {
-            // 💡 判定ロジック：管理者、区分、ステータス、理由のいずれかが欠けていたらTrue（ボタン無効）
-            const isSubmitDisabled = 
-              !changeForm.confirmedBy || 
-              !changeForm.changeCategory || 
-              !changeForm.status || 
-              !changeForm.reason.trim();
+            const isSubmitDisabled = !changeForm.confirmedBy || !changeForm.changeCategory || !changeForm.status || !changeForm.reason.trim();
 
             return (
               <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
@@ -1857,7 +1868,7 @@
                   <div className="bg-red-600 px-5 py-4 text-white font-bold flex gap-3"><Icon name="edit" size={20} />変更申請</div>
                   <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-5">
                     <div><label className="block text-sm font-bold text-gray-700 mb-1.5">対象日</label><select value={changeForm.day} onChange={(e) => handleChangeFormDay(e.target.value)} className="w-full border p-3 rounded-md font-bold">{daysArray.map(d => <option key={d} value={d}>{currentMonth}月{d}日</option>)}</select></div>
-                    <div className="bg-gray-50 rounded-md p-4 border"><p className="text-xs text-gray-500 font-bold mb-1">現在</p><p className="font-bold text-lg">{(() => { const shiftForDay = (shifts[currentUser?.id] || {})[changeForm.day]; return shiftForDay ? formatShiftStr(shiftForDay) : '未入力'; })()}</p></div>
+                    <div className="bg-gray-50 rounded-md p-4 border"><p className="text-xs text-gray-500 font-bold mb-1">現在</p><p className="font-bold text-lg">{(() => { const shiftForDay = (currentMonthShifts[currentUser?.id] || {})[changeForm.day]; return shiftForDay ? formatShiftStr(shiftForDay) : '未入力'; })()}</p></div>
                     <div className="border-t pt-4">
                       {/* 1. 事前確認管理者 */}
                       <div className="mb-4">
