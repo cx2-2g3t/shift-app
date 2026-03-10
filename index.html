@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>シフトの窓口</title>
-  
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -67,9 +66,7 @@
     };
 
     function App() {
-      // =========================================================
-      // 新しいGASのウェブアプリURLを反映済
-      // =========================================================
+      // GASのウェブアプリURL
       const GAS_URL = "https://script.google.com/macros/s/AKfycbxbzJxiBjROBm8EUXIYVckjhNnN4QhGqrtr_MCC8ndjLrEzJTiX6qp8FJE1_5QjM1WJ/exec";
 
       const fetchGAS = (action, ...args) => {
@@ -83,8 +80,8 @@
           try {
             return JSON.parse(text);
           } catch (e) {
-            console.error("【GASからの返答内容】\n", text);
-            throw new Error("Googleのセキュリティによってブロックされています");
+            console.error("【GASからの返答】\n", text);
+            throw new Error("セキュリティブロック、または通信エラーです");
           }
         })
         .then(data => {
@@ -230,20 +227,27 @@
 
             const shiftsState = {}; const statusState = {};
             (data.shifts || []).forEach(row => {
-              if (!shiftsState[row.month]) shiftsState[row.month] = {};
-              if (!statusState[row.month]) statusState[row.month] = {};
-              shiftsState[row.month][row.userId] = typeof row.shiftData === 'string' ? JSON.parse(row.shiftData) : row.shiftData;
-              statusState[row.month][row.userId] = row.status;
+              if (row.month) {
+                if (!shiftsState[row.month]) shiftsState[row.month] = {};
+                if (!statusState[row.month]) statusState[row.month] = {};
+                shiftsState[row.month][row.userId] = typeof row.shiftData === 'string' ? JSON.parse(row.shiftData) : row.shiftData;
+                statusState[row.month][row.userId] = row.status;
+              }
             });
             setShifts(shiftsState); setSubmissionStatus(statusState);
 
+            // ★安全なパース処理
             const dailyNotesState = {};
             (data.dailyNotes || []).forEach(row => {
-              if (row.dateKey) {
-                const mStr = row.dateKey.substring(0, 7); 
-                const d = parseInt(row.dateKey.split('-')[2], 10);
-                if (!dailyNotesState[mStr]) dailyNotesState[mStr] = {};
-                dailyNotesState[mStr][d] = row.note;
+              const dKey = String(row.dateKey || '');
+              if (dKey.includes('-')) {
+                const parts = dKey.split('-');
+                if(parts.length >= 3) {
+                  const mStr = `${parts[0]}-${parts[1]}`;
+                  const d = parseInt(parts[2], 10);
+                  if (!dailyNotesState[mStr]) dailyNotesState[mStr] = {};
+                  dailyNotesState[mStr][d] = row.note;
+                }
               }
             });
             setDailyNotes(dailyNotesState);
@@ -258,15 +262,14 @@
 
             setChangeRequests(data.changeRequests || []);
             
-            // 💡 初期読み込み時に申請中のシフト変更を pendingChanges にセットする処理を追加
+            // ★安全な pendingChanges セット処理
             const initialPending = {};
             (data.changeRequests || []).forEach(req => {
-              if (req.status === 'pending') {
+              if (req.status === 'pending' && req.userId) {
                 if (!initialPending[req.userId]) initialPending[req.userId] = {};
-                if (req.changes && Array.isArray(req.changes)) {
-                  req.changes.forEach(c => {
-                    initialPending[req.userId][c.day] = true;
-                  });
+                const safeChanges = Array.isArray(req.changes) ? req.changes : [];
+                if (safeChanges.length > 0) {
+                  safeChanges.forEach(c => { if(c.day) initialPending[req.userId][c.day] = true; });
                 } else if (req.day) {
                   initialPending[req.userId][req.day] = true;
                 }
@@ -282,14 +285,14 @@
             
             const mailsState = {};
             (data.users || []).forEach(u => {
-              const userMails = historyReversed.filter(m => m.targetNames.includes(u.name) || m.targetNames.includes(getDisplayName(u.name)));
+              const userMails = historyReversed.filter(m => m.targetNames && (m.targetNames.includes(u.name) || m.targetNames.includes(getDisplayName(u.name))));
               if (userMails.length > 0) mailsState[u.id] = userMails;
             });
             setStaffMails(mailsState);
             setIsLoading(false);
           })
           .catch(() => {
-            console.log("データの読み込みを行っています...");
+            console.log("データの読み込み中...");
             setIsLoading(false);
           });
       }, []); 
@@ -302,14 +305,17 @@
                 setDbUsers(data.users || []);
                 setChangeRequests(data.changeRequests || []);
                 setAdminNotifications(data.notifications || []);
-                
                 const dailyNotesState = {};
                 (data.dailyNotes || []).forEach(row => {
-                  if (row.dateKey) {
-                    const mStr = row.dateKey.substring(0, 7);
-                    const d = parseInt(row.dateKey.split('-')[2], 10);
-                    if (!dailyNotesState[mStr]) dailyNotesState[mStr] = {};
-                    dailyNotesState[mStr][d] = row.note;
+                  const dKey = String(row.dateKey || '');
+                  if (dKey.includes('-')) {
+                    const parts = dKey.split('-');
+                    if(parts.length >= 3) {
+                      const mStr = `${parts[0]}-${parts[1]}`;
+                      const d = parseInt(parts[2], 10);
+                      if (!dailyNotesState[mStr]) dailyNotesState[mStr] = {};
+                      dailyNotesState[mStr][d] = row.note;
+                    }
                   }
                 });
                 setDailyNotes(dailyNotesState);
@@ -440,7 +446,7 @@
         const updatedUser = { ...tempUser, password: passwordInput };
         fetchGAS('saveRecord', 'users', 'id', updatedUser)
           .then(() => { setIsLoading(false); loginSuccess(updatedUser); })
-          .catch(() => { setIsLoading(false); setLoginError('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); });
+          .catch(() => { setIsLoading(false); setLoginError('システムとの接続に失敗しました。'); });
       };
 
       const handleResetRequestSubmit = (e) => {
@@ -458,12 +464,12 @@
           fetchGAS('saveRecord', 'users', 'id', updatedUser)
             .then(() => {
               setIsLoading(false);
-              showToast('パスワードを初期化しました。初期パスワード（社員番号）でログインしてください。');
+              showToast('パスワードを初期化しました。初期パスワードでログインしてください。');
               goBackToLogin();
             })
             .catch(() => {
               setIsLoading(false);
-              setLoginError('システムエラーが発生しました。通信環境をご確認ください。');
+              setLoginError('システムエラーが発生しました。');
             });
         } else { 
           setIsLoading(false);
@@ -500,7 +506,7 @@
           const hasUnentered = daysArray.some(day => !currentShiftsForSubmit[day] || currentShiftsForSubmit[day].status === '未');
           if (hasUnentered) { setConfirmModal({ isOpen: true, title: '未入力エラー', message: '未入力の日付があります。すべて選択してから提出してください。', isAlert: true, onConfirm: null }); return; }
           const hasMissingTime = daysArray.some(day => { const s = currentShiftsForSubmit[day]; return (s && s.status === '勤務') ? (!s.start || !s.end) : false; });
-          if (hasMissingTime) { setConfirmModal({ isOpen: true, title: '時間未入力エラー', message: '「勤務」の日は、出勤時間と退勤時間の両方を選択してください。', isAlert: true, onConfirm: null }); return; }
+          if (hasMissingTime) { setConfirmModal({ isOpen: true, title: '時間未入力エラー', message: '「勤務」の日は、出退勤時間の両方を選択してください。', isAlert: true, onConfirm: null }); return; }
         }
         
         setIsLoading(true);
@@ -513,7 +519,7 @@
             setConfirmModal({ isOpen: true, title: '処理完了', message: isSubmit ? 'シフトの提出が完了しました。' : 'シフトを一時保存しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); setIsLoading(false); });
+          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
       };
 
       const handleChangeFormDay = (dayStr) => {
@@ -529,7 +535,7 @@
         setChangeForm({ isOpen: true, day: initialDay, status: currentShift.status === '未' ? '勤務' : currentShift.status, start: currentShift.start || DEFAULT_START_TIME, end: currentShift.end || DEFAULT_END_TIME, canWorkIfNeeded: currentShift.canWorkIfNeeded || false, note: currentShift.note || '', reason: '', changeCategory: '', confirmedBy: '' });
       };
 
-      // 💡真っ白になる（クラッシュする）原因だった部分を安全な設計に修正
+      // ★クラッシュ防止：変更申請時の状態更新を安全に行う
       const submitChangeRequest = () => {
         if (!currentUser) return;
         if (!changeForm.confirmedBy) { showToast('事前確認管理者を選択してください', 'error'); return; }
@@ -540,9 +546,7 @@
         const original = (currentMonthShifts[currentUser.id] || {})[changeForm.day] || { status: '未' };
         const newVal = { status: changeForm.status, start: changeForm.start, end: changeForm.end, canWorkIfNeeded: changeForm.canWorkIfNeeded, note: changeForm.note, changeCategory: changeForm.changeCategory };
         
-        // 日付生成でエラーが起きないよう安全な文字列生成に修正
-        const now = new Date();
-        const pad = n => String(n).padStart(2, '0');
+        const now = new Date(); const pad = n => String(n).padStart(2, '0');
         const createdAtSafe = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
         const newReq = { 
@@ -556,21 +560,12 @@
         fetchGAS('saveRecord', 'changeRequests', 'id', newReq)
           .then(() => {
             setChangeRequests(prev => [newReq, ...prev]);
-            
-            // 💡Reactの厳格なルールに基づき、状態（state）を直接書き換えず安全にコピーして更新するように修正
-            setPendingChanges(prev => ({
-              ...prev,
-              [currentUser.id]: {
-                ...(prev[currentUser.id] || {}),
-                [changeForm.day]: true
-              }
-            }));
-            
+            setPendingChanges(prev => ({ ...prev, [currentUser.id]: { ...(prev[currentUser.id] || {}), [changeForm.day]: true } }));
             setChangeForm(prev => ({ ...prev, isOpen: false }));
-            setConfirmModal({ isOpen: true, title: '申請完了', message: '申請を送信しました。管理者の承認をお待ちください。', isAlert: true, onConfirm: null });
+            setConfirmModal({ isOpen: true, title: '申請完了', message: '申請を送信しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); setIsLoading(false); });
+          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
       };
 
       const handleApprove = (reqId) => {
@@ -578,12 +573,15 @@
         const req = changeRequests.find(r => r.id === reqId);
         if (!req) { setIsLoading(false); return; }
         
-        const category = adminChangeCategories[reqId] || req.newVal.changeCategory;
-        const attStatus = adminAttendanceStatuses[reqId];
+        const safeNewVal = req.newVal || {};
+        const category = adminChangeCategories[reqId] || safeNewVal.changeCategory || '未設定';
+        const attStatus = adminAttendanceStatuses[reqId] || '未設定';
+        const safeChanges = Array.isArray(req.changes) ? req.changes : [];
+
         const updatedReq = { 
           ...req, status: 'approved', processedBy: getDisplayName(currentUser.name),
-          newVal: { ...req.newVal, changeCategory: category, attendanceStatus: attStatus }, 
-          changes: req.changes.map(c => ({ ...c, newVal: { ...c.newVal, changeCategory: category, attendanceStatus: attStatus } })) 
+          newVal: { ...safeNewVal, changeCategory: category, attendanceStatus: attStatus }, 
+          changes: safeChanges.map(c => ({ ...c, newVal: { ...(c.newVal||{}), changeCategory: category, attendanceStatus: attStatus } })) 
         };
 
         const targetMon = req.targetMonth || activeTargetMonth; 
@@ -603,7 +601,7 @@
             setConfirmModal({ isOpen: true, title: '処理完了', message: '承認し、反映しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); setIsLoading(false); });
+          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
       };
 
       const handleReject = (reqId) => {
@@ -614,7 +612,8 @@
 
         fetchGAS('saveRecord', 'changeRequests', 'id', updatedReq)
           .then(() => {
-            setPendingChanges(prev => { const uPending = { ...(prev[req.userId] || {}) }; req.changes.forEach(c => delete uPending[c.day]); return { ...prev, [req.userId]: uPending }; });
+            const safeChanges = Array.isArray(req.changes) ? req.changes : [];
+            setPendingChanges(prev => { const uPending = { ...(prev[req.userId] || {}) }; safeChanges.forEach(c => delete uPending[c.day]); return { ...prev, [req.userId]: uPending }; });
             setChangeRequests(prev => prev.map(r => r.id === reqId ? updatedReq : r));
             setApprovalChecks(prev => { const newChecks = { ...prev }; delete newChecks[reqId]; return newChecks; });
             setAdminChangeCategories(prev => { const newC = { ...prev }; delete newC[reqId]; return newC; });
@@ -622,7 +621,7 @@
             setConfirmModal({ isOpen: true, title: '処理完了', message: '却下しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); setIsLoading(false); });
+          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
       };
 
       const toggleApprovalCheck = (reqId, type) => { setApprovalChecks(prev => { const current = prev[reqId] || { shift: false, kot: false }; return { ...prev, [reqId]: { ...current, [type]: !current[type] } }; }); };
@@ -668,13 +667,7 @@
         fetchGAS('saveRecord', sheetName, keyColumn, record)
           .then(() => {
             if (isDaily) {
-              setDailyNotes(prev => ({ 
-                ...prev, 
-                [currentMonthStr]: { 
-                  ...(prev[currentMonthStr] || {}), 
-                  [modal.targetId]: modal.text 
-                } 
-              }));
+              setDailyNotes(prev => ({ ...prev, [currentMonthStr]: { ...(prev[currentMonthStr] || {}), [modal.targetId]: modal.text } }));
             } else {
               setPersonalNotes(prev => ({ ...prev, [modal.targetId]: modal.text }));
             }
@@ -700,12 +693,7 @@
 
         const newId = `u${Date.now()}`;
         const safeName = newStaff.name || '名称未設定';
-        const newUser = { 
-          employeeId: newStaff.employeeId, id: newId, name: safeName, email: newStaff.email, 
-          role: newStaff.isAdmin ? 'admin' : 'staff', status: 'active', 
-          password: "'" + newStaff.employeeId,
-          employmentCategory: newStaff.employmentCategory
-        };
+        const newUser = { employeeId: newStaff.employeeId, id: newId, name: safeName, email: newStaff.email, role: newStaff.isAdmin ? 'admin' : 'staff', status: 'active', password: "'" + newStaff.employeeId, employmentCategory: newStaff.employmentCategory };
 
         fetchGAS('saveRecord', 'users', 'id', newUser)
           .then(() => {
@@ -839,7 +827,7 @@
       const applyFixedShiftsToMonth = () => {
         setConfirmModal({ isOpen: true, title: '一括自動入力の確認', message: `固定シフトを未入力の日に反映します。よろしいですか？`, isAlert: false, onConfirm: () => {
           setIsLoading(true);
-          const newShifts = JSON.parse(JSON.stringify(shifts)); // ディープコピーで安全に複製
+          const newShifts = JSON.parse(JSON.stringify(shifts));
           if (!newShifts[activeTargetMonth]) newShifts[activeTargetMonth] = {};
           const updatePromises = [];
           
@@ -1334,23 +1322,26 @@
                           <div className="divide-y divide-gray-200">
                             {pendingReqs.map(req => {
                               const checks = approvalChecks[req.id] || { shift: false, kot: false };
-                              const category = adminChangeCategories[req.id] || req.newVal.changeCategory;
-                              const attStatus = adminAttendanceStatuses[req.id];
+                              const safeNewVal = req.newVal || {};
+                              const category = adminChangeCategories[req.id] || safeNewVal.changeCategory || '';
+                              const attStatus = adminAttendanceStatuses[req.id] || '';
                               const canApprove = checks.shift && checks.kot && category && attStatus;
+                              const safeChanges = Array.isArray(req.changes) ? req.changes : [];
+                              const safeDate = req.createdAt ? String(req.createdAt).split(' ')[0] : '';
 
                               return (
                                 <div key={req.id} className="p-4 sm:p-5 bg-orange-50/80 relative overflow-hidden border-b border-orange-100">
                                   <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-orange-500"></div>
                                   <div className="flex justify-between items-start mb-3">
                                     <p className="font-black text-orange-900 flex items-center gap-2"><Icon name="exclamation-circle" className="text-orange-500"/> {req.userName} さんから変更申請</p>
-                                    <span className="text-xs text-gray-500 bg-white px-2 py-1 rounded-md shadow-sm">{req.createdAt.split(' ')[0]}</span>
+                                    <span className="text-xs text-gray-500 bg-white px-2 py-1 rounded-md shadow-sm">{safeDate}</span>
                                   </div>
                                   <p className="text-sm font-bold text-gray-700 bg-white rounded-md p-3 shadow-sm mb-3 border border-gray-200">
                                     理由: {req.reason}
                                     <span className="text-indigo-600 text-xs mt-1.5 block flex items-center gap-1"><Icon name="user-check"/> 事前確認: {req.confirmedBy}</span>
                                   </p>
                                   <div className="space-y-2">
-                                    {req.changes.map((c, idx) => (
+                                    {safeChanges.map((c, idx) => (
                                       <div key={idx} className="text-sm bg-white rounded-md p-3 border border-orange-200 flex items-center gap-3 shadow-sm">
                                         <span className="font-bold bg-orange-100 rounded-md px-3 py-1.5 text-orange-800">{c.day}日</span> 
                                         <div className="flex flex-col flex-1">
@@ -1358,7 +1349,7 @@
                                           <div className="flex items-center gap-2 mt-1">
                                             <Icon name="arrow-right" className="text-gray-400" />
                                             <span className="text-orange-700 font-bold text-base">{formatShiftStr(c.newVal)}</span>
-                                            {c.newVal.note && <span className="text-gray-500 text-xs ml-2 bg-gray-100 px-2 py-0.5 rounded-md border">備考: {c.newVal.note}</span>}
+                                            {c.newVal?.note && <span className="text-gray-500 text-xs ml-2 bg-gray-100 px-2 py-0.5 rounded-md border">備考: {c.newVal.note}</span>}
                                           </div>
                                         </div>
                                       </div>
@@ -1378,7 +1369,7 @@
                                     <div className="mb-4">
                                       <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-1.5"><Icon name="tag" className="text-indigo-500"/> 勤怠種別を選択 <span className="text-red-500 text-xs">*必須</span></label>
                                       <div className="flex flex-wrap gap-2">
-                                        {['出勤', '遅刻', '早退', '欠勤', '有休'].map(type => (
+                                        {['出勤', '遅刻', '早退', '欠勤', '有休', '時間変更'].map(type => (
                                           <label key={type} className={`cursor-pointer px-3 py-1.5 rounded-md border text-xs font-bold ${attStatus === type ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-50 text-gray-600'}`}>
                                             <input type="radio" className="hidden" checked={attStatus === type} onChange={() => setAdminAttendanceStatuses(prev => ({...prev, [req.id]: type}))} /> {type}
                                           </label>
@@ -1676,24 +1667,28 @@
                         </thead>
                         <tbody className="divide-y">
                           {changeRequests.length === 0 ? (<tr><td colSpan="10" className="p-10 text-center text-gray-500 font-bold">履歴はありません</td></tr>) : (
-                            changeRequests.map(req => (
-                              <tr key={req.id} className="hover:bg-gray-50">
-                                <td className="px-5 py-4 text-sm text-gray-500">{req.createdAt}</td>
-                                <td className="px-5 py-4 font-bold text-gray-800"><Icon name="user" className="mr-2 text-gray-400"/>{req.userName}</td>
-                                <td className="px-5 py-4 font-bold text-indigo-600 text-lg text-center">{req.targetMonth ? `${req.targetMonth.split('-')[1]}/` : ''}{req.day}日</td>
-                                <td className="px-5 py-4 text-center"><span className="bg-gray-100 border text-gray-700 px-3 py-1 text-sm font-bold">{req.newVal?.changeCategory || '-'}</span></td>
-                                <td className="px-5 py-4 text-center"><span className="bg-indigo-50 border text-indigo-700 px-3 py-1 text-sm font-bold">{req.newVal?.attendanceStatus || '-'}</span></td>
-                                <td className="px-5 py-4 align-top"><span className="text-gray-400 line-through bg-gray-50 border px-3 py-1.5 text-sm block w-fit mx-auto">{formatShiftStr(req.oldVal)}</span></td>
-                                <td className="px-5 py-4 align-top"><div className="flex flex-col items-center gap-1.5"><span className={`font-bold px-3 py-1.5 rounded-md text-sm ${req.status === 'approved' ? 'bg-green-50 text-green-700 border' : 'bg-orange-50 text-orange-700 border'}`}>{formatShiftStr(req.newVal)}</span>{req.newVal.note && <span className="text-[11px] text-gray-500 bg-gray-100 p-1.5 border w-full text-center">備考: {req.newVal.note}</span>}</div></td>
-                                <td className="px-5 py-4 text-sm text-gray-600">{req.reason}</td>
-                                <td className="px-5 py-4 text-center">
-                                  {req.status === 'pending' && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1.5 border rounded-full">承認待ち</span>}
-                                  {req.status === 'approved' && <span className="bg-green-100 text-green-700 text-xs font-bold px-3 py-1.5 border rounded-full">承認済</span>}
-                                  {req.status === 'rejected' && <span className="bg-gray-100 text-gray-500 text-xs font-bold px-3 py-1.5 border rounded-full">却下</span>}
-                                </td>
-                                <td className="px-5 py-4 text-sm font-bold text-gray-700">{req.processedBy || '-'}</td>
-                              </tr>
-                            ))
+                            changeRequests.map(req => {
+                              const safeChanges = Array.isArray(req.changes) ? req.changes : [];
+                              const safeDate = req.createdAt ? String(req.createdAt).split(' ')[0] : '';
+                              return (
+                                <tr key={req.id} className="hover:bg-gray-50">
+                                  <td className="px-5 py-4 text-sm text-gray-500">{safeDate}</td>
+                                  <td className="px-5 py-4 font-bold text-gray-800"><Icon name="user" className="mr-2 text-gray-400"/>{req.userName}</td>
+                                  <td className="px-5 py-4 font-bold text-indigo-600 text-lg text-center">{req.targetMonth ? `${req.targetMonth.split('-')[1]}/` : ''}{req.day}日</td>
+                                  <td className="px-5 py-4 text-center"><span className="bg-gray-100 border text-gray-700 px-3 py-1 text-sm font-bold">{req.newVal?.changeCategory || '-'}</span></td>
+                                  <td className="px-5 py-4 text-center"><span className="bg-indigo-50 border text-indigo-700 px-3 py-1 text-sm font-bold">{req.newVal?.attendanceStatus || '-'}</span></td>
+                                  <td className="px-5 py-4 align-top"><span className="text-gray-400 line-through bg-gray-50 border px-3 py-1.5 text-sm block w-fit mx-auto">{formatShiftStr(req.oldVal)}</span></td>
+                                  <td className="px-5 py-4 align-top"><div className="flex flex-col items-center gap-1.5"><span className={`font-bold px-3 py-1.5 rounded-md text-sm ${req.status === 'approved' ? 'bg-green-50 text-green-700 border' : 'bg-orange-50 text-orange-700 border'}`}>{formatShiftStr(req.newVal)}</span>{req.newVal?.note && <span className="text-[11px] text-gray-500 bg-gray-100 p-1.5 border w-full text-center">備考: {req.newVal.note}</span>}</div></td>
+                                  <td className="px-5 py-4 text-sm text-gray-600">{req.reason}</td>
+                                  <td className="px-5 py-4 text-center">
+                                    {req.status === 'pending' && <span className="bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1.5 border rounded-full">承認待ち</span>}
+                                    {req.status === 'approved' && <span className="bg-green-100 text-green-700 text-xs font-bold px-3 py-1.5 border rounded-full">承認済</span>}
+                                    {req.status === 'rejected' && <span className="bg-gray-100 text-gray-500 text-xs font-bold px-3 py-1.5 border rounded-full">却下</span>}
+                                  </td>
+                                  <td className="px-5 py-4 text-sm font-bold text-gray-700">{req.processedBy || '-'}</td>
+                                </tr>
+                              )
+                            })
                           )}
                         </tbody>
                       </table>
@@ -1786,10 +1781,7 @@
                         <button onClick={() => openTemplateForm(null)} className="bg-indigo-600 text-white px-4 py-2 font-bold rounded-md flex gap-2"><Icon name="plus" /> 新規追加</button>
                       </div>
                       <div className="p-5 bg-gray-50">
-                        <div className="mb-4 bg-white rounded-md border p-3 text-sm text-gray-600 flex gap-2">
-                          <Icon name="info-circle" className="text-blue-500 mt-0.5" />
-                          <p>本文に <code className="bg-gray-100 text-red-600 font-bold">{`{month}`}</code> で月、<code className="bg-gray-100 text-red-600 font-bold">{`{deadline}`}</code> で締切日を自動挿入。</p>
-                        </div>
+                        <div className="mb-4 bg-white rounded-md border p-3 text-sm text-gray-600 flex gap-2"><Icon name="info-circle" className="text-blue-500 mt-0.5" /><p>本文に <code className="bg-gray-100 text-red-600 font-bold">{`{month}`}</code> で月、<code className="bg-gray-100 text-red-600 font-bold">{`{deadline}`}</code> で締切日を自動挿入。</p></div>
                         <div className="grid gap-4 md:grid-cols-2">
                           {emailTemplates.map(tpl => (
                             <div key={tpl.id} className="bg-white rounded-md border p-4 flex flex-col h-full group relative">
@@ -1928,22 +1920,16 @@
                     <div><label className="block text-sm font-bold text-gray-700 mb-1.5">対象日</label><select value={changeForm.day} onChange={(e) => handleChangeFormDay(e.target.value)} className="w-full border p-3 rounded-md font-bold">{daysArray.map(d => <option key={d} value={d}>{currentMonth}月{d}日</option>)}</select></div>
                     <div className="bg-gray-50 rounded-md p-4 border"><p className="text-xs text-gray-500 font-bold mb-1">現在</p><p className="font-bold text-lg">{(() => { const shiftForDay = (currentMonthShifts[currentUser?.id] || {})[changeForm.day]; return shiftForDay ? formatShiftStr(shiftForDay) : '未入力'; })()}</p></div>
                     <div className="border-t pt-4">
-                      {/* 1. 事前確認管理者 */}
                       <div className="mb-4">
-                        <label className="block text-sm font-bold text-gray-700 mb-2">
-                          事前確認管理者 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span>
-                        </label>
+                        <label className="block text-sm font-bold text-gray-700 mb-2">事前確認管理者 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span></label>
                         <select value={changeForm.confirmedBy || ''} onChange={(e) => setChangeForm({...changeForm, confirmedBy: e.target.value})} className="w-full border p-3 rounded-md text-sm">
                           <option value="">-- 選択してください --</option>
                           {adminUsersList.map(a => <option key={a.id} value={a.name}>{getDisplayName(a.name)}</option>)}
                         </select>
                       </div>
 
-                      {/* 2. 区分 */}
                       <div className="mb-4">
-                        <label className="block text-sm font-bold text-gray-700 mb-2">
-                          区分 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span>
-                        </label>
+                        <label className="block text-sm font-bold text-gray-700 mb-2">区分 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span></label>
                         <div className="flex gap-2">
                           {['自己変更', '依頼変更'].map(c => (
                             <button key={c} onClick={() => setChangeForm({...changeForm, changeCategory: c})} className={`flex-1 rounded-md py-2.5 text-sm font-bold border transition-colors ${changeForm.changeCategory === c ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-300'}`}>{c}</button>
@@ -1951,10 +1937,7 @@
                         </div>
                       </div>
 
-                      {/* 3. 変更後 */}
-                      <label className="block text-sm font-bold text-red-600 mb-3">
-                        変更後 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span>
-                      </label>
+                      <label className="block text-sm font-bold text-red-600 mb-3">変更後 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span></label>
                       <div className="flex gap-2 mb-3">
                         <button onClick={() => setChangeForm({...changeForm, status: '休'})} className={`flex-1 rounded-md py-2.5 text-sm font-bold border transition-colors ${changeForm.status === '休' ? 'bg-red-500 text-white border-red-500' : 'bg-white text-gray-700 border-gray-300'}`}>休</button>
                         <button onClick={() => setChangeForm({...changeForm, status: '有休'})} className={`flex-1 rounded-md py-2.5 text-sm font-bold border transition-colors ${changeForm.status === '有休' ? 'bg-teal-500 text-white border-teal-500' : 'bg-white text-gray-700 border-gray-300'}`}>有休</button>
@@ -1979,11 +1962,8 @@
                       <input type="text" value={changeForm.note || ''} onChange={(e) => setChangeForm({...changeForm, note: e.target.value})} placeholder="備考（任意）" className="w-full border px-4 py-2.5 rounded-md focus:ring-2 focus:ring-red-100 outline-none" />
                     </div>
 
-                    {/* 4. 変更理由 */}
                     <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-1.5">
-                        変更理由 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span>
-                      </label>
+                      <label className="block text-sm font-bold text-gray-700 mb-1.5">変更理由 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span></label>
                       <textarea value={changeForm.reason} onChange={(e) => setChangeForm({...changeForm, reason: e.target.value})} className="w-full border p-3 rounded-md h-24 resize-none focus:ring-2 focus:ring-red-100 outline-none" placeholder="申請の理由を詳しく入力してください" />
                     </div>
                   </div>
