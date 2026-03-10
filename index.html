@@ -70,7 +70,7 @@
       // =========================================================
       // ★ここに新しく発行したGASのウェブアプリURLを貼り付けてください！
       // =========================================================
-      const GAS_URL = "https://script.google.com/macros/s/AKfycbxbzJxiBjROBm8EUXIYVckjhNnN4QhGqrtr_MCC8ndjLrEzJTiX6qp8FJE1_5QjM1WJ/exec";
+      const GAS_URL = "https://script.google.com/macros/s/AKfycbyjCN5SO-HilpcVO_AH89IfGcCqKSEd9omAYJswzfZZyDoYAduOLS1WmGaFkGluvb3u/exec";
 
       const fetchGAS = (action, ...args) => {
         return fetch(GAS_URL, {
@@ -369,7 +369,11 @@
           .then((result) => {
             setIsLoading(false);
             if (result.success) {
-              if (result.isInitial) { setTempUser(result.user); setLoginStep('change_password'); }
+              if (result.isInitial) {
+                setTempUser(result.user); 
+                setPasswordInput('');
+                setPasswordConfirm('');
+                setLoginStep('change_password'); }
               else { loginSuccess(result.user); }
             } else { setLoginError(result.message); }
           })
@@ -412,16 +416,27 @@
         if (!(resetEmailInput || '').trim()) { setLoginError('メールアドレスを入力してください。'); return; }
 
         setIsLoading(true);
-        setTimeout(() => {
-          const user = dbUsers.find(u => u.employeeId === resetIdInput);
-          if (user && user.email === resetEmailInput) {
-            setTempUser({...user, password: null});
-            setIsResetMode(true); setLoginStep('change_password');
-            setPasswordInput(''); setPasswordConfirm(''); setResetIdInput(''); setResetEmailInput('');
-            showToast('本人確認が完了しました。新しいパスワードを設定してください。');
-          } else { setLoginError('入力された情報が登録内容と一致しません。'); }
+        const user = dbUsers.find(u => u.employeeId === resetIdInput);
+        if (user && user.email === resetEmailInput) {
+          
+          const resetPasswordStr = "'" + user.employeeId;
+          const updatedUser = { ...user, password: resetPasswordStr };
+
+          fetchGAS('saveRecord', 'users', 'id', updatedUser)
+            .then(() => {
+              setIsLoading(false);
+              showToast('パスワードを初期化しました。初期パスワード（社員番号）でログインしてください。');
+              goBackToLogin(); // ログイン画面に戻す
+            })
+            .catch(() => {
+              setIsLoading(false);
+              setLoginError('システムエラーが発生しました。通信環境をご確認ください。');
+            });
+            
+        } else { 
           setIsLoading(false);
-        }, 600);
+          setLoginError('入力された情報が登録内容と一致しません。'); 
+        }
       };
 
       const loginSuccess = (user) => {
@@ -1940,4 +1955,3 @@
   </script>
 </body>
 </html>
-
