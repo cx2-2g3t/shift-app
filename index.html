@@ -1786,4 +1786,241 @@
                         <button onClick={() => openTemplateForm(null)} className="bg-indigo-600 text-white px-4 py-2 font-bold rounded-md flex gap-2"><Icon name="plus" /> 新規追加</button>
                       </div>
                       <div className="p-5 bg-gray-50">
-                        <div className="mb-4 bg-white rounded-md border p-3 text-sm text-gray-600 flex gap-2"><Icon name="info-
+                        <div className="mb-4 bg-white rounded-md border p-3 text-sm text-gray-600 flex gap-2">
+                          <Icon name="info-circle" className="text-blue-500 mt-0.5" />
+                          <p>本文に <code className="bg-gray-100 text-red-600 font-bold">{`{month}`}</code> で月、<code className="bg-gray-100 text-red-600 font-bold">{`{deadline}`}</code> で締切日を自動挿入。</p>
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          {emailTemplates.map(tpl => (
+                            <div key={tpl.id} className="bg-white rounded-md border p-4 flex flex-col h-full group relative">
+                              <div className="flex justify-between items-start mb-3 border-b pb-2">
+                                <h3 className="font-bold text-lg text-gray-800 pr-16">{generateMailText(tpl.name)}</h3>
+                                <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button onClick={() => openTemplateForm(tpl)} className="bg-gray-100 text-gray-600 p-2 rounded-md"><Icon name="pen" /></button>
+                                  <button onClick={() => deleteTemplate(tpl.id)} className="bg-red-50 text-red-600 p-2 rounded-md"><Icon name="trash" /></button>
+                                </div>
+                              </div>
+                              <div className="text-sm text-gray-600 whitespace-pre-wrap flex-1">{renderTextWithLink(generateMailText(tpl.body))}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* モーダル群 */}
+          {templateForm.isOpen && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
+              <div className="bg-white rounded-lg shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
+                <div className="bg-indigo-600 px-5 py-4 text-white font-bold text-lg flex gap-3"><Icon name="pen" size={20} />{templateForm.id.startsWith('t') && emailTemplates.find(t=>t.id === templateForm.id) ? '編集' : '新規追加'}</div>
+                <div className="p-5 space-y-4">
+                  <div><label className="block text-sm font-bold text-gray-700 mb-1.5">件名</label><input type="text" value={templateForm.name} onChange={e => setTemplateForm({...templateForm, name: e.target.value})} className="w-full border p-3 rounded-md focus:ring-2 outline-none" /></div>
+                  <div><label className="block text-sm font-bold text-gray-700 mb-1.5">本文</label><textarea value={templateForm.body} onChange={e => setTemplateForm({...templateForm, body: e.target.value})} className="w-full border p-3 rounded-md h-48 resize-none focus:ring-2 outline-none" /></div>
+                </div>
+                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t">
+                  <button onClick={() => setTemplateForm({ isOpen: false, id: null, name: '', body: '' })} className="px-5 py-2.5 rounded-md font-bold text-gray-600">キャンセル</button>
+                  <button onClick={saveTemplate} className="px-6 py-2.5 rounded-md font-bold bg-indigo-600 text-white">保存する</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {fixedShiftForm.isOpen && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
+              <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="bg-emerald-600 px-5 py-4 text-white font-bold text-lg flex justify-between"><div className="flex gap-3"><Icon name="calendar-day" size={20} />曜日固定 - {fixedShiftForm.userName}</div><button onClick={() => setFixedShiftForm({...fixedShiftForm, isOpen: false})}><Icon name="times" size={20}/></button></div>
+                <div className="overflow-y-auto flex-1">
+                  <div className="divide-y">
+                    {[0, 1, 2, 3, 4, 5, 6].map(dow => {
+                      const shiftData = fixedShiftForm.data[dow]; const isWorking = shiftData.status === '勤務'; const isRest = shiftData.status === '休';
+                      return (
+                        <div key={dow} className={`flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3 p-1.5 sm:px-4 sm:py-2 ${isWorking ? 'bg-blue-50/20' : isRest && shiftData.canWorkIfNeeded ? 'bg-orange-50/20' : 'bg-white'}`}>
+                          <div className="w-full sm:w-16 shrink-0"><span className={`text-lg font-black ${DOW_COLORS[dow]}`}>{DOW_NAMES[dow]}曜</span></div>
+                          <div className="grid grid-cols-3 gap-1 sm:flex sm:gap-2 w-full sm:w-auto">
+                            <button onClick={() => updateFixedShiftForm(dow, 'status', '未')} className={`w-full sm:w-16 py-1 sm:py-1.5 rounded-md font-bold border ${shiftData.status === '未' ? 'bg-gray-600 text-white' : 'bg-white text-gray-500'}`}>未</button>
+                            <button onClick={() => updateFixedShiftForm(dow, 'status', '休')} className={`w-full sm:w-16 py-1 sm:py-1.5 rounded-md font-bold border ${shiftData.status === '休' ? 'bg-red-500 text-white' : 'bg-white text-gray-700'}`}>休</button>
+                            <button onClick={() => updateFixedShiftForm(dow, 'status', '勤務')} className={`w-full sm:w-16 py-1 sm:py-1.5 rounded-md font-bold border ${isWorking ? 'bg-blue-600 text-white' : 'bg-white text-blue-700'}`}>勤務</button>
+                          </div>
+                          {(isWorking || (isRest && shiftData.canWorkIfNeeded)) && (
+                            <div className="flex items-center gap-1.5 sm:ml-auto">
+                              <select value={shiftData.start} onChange={(e) => updateFixedShiftForm(dow, 'start', e.target.value)} className="bg-white border rounded-md py-1 px-0 w-16 text-center">{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
+                              <span>~</span>
+                              <select value={shiftData.end} onChange={(e) => updateFixedShiftForm(dow, 'end', e.target.value)} className="bg-white border rounded-md py-1 px-0 w-16 text-center">{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
+                            </div>
+                          )}
+                          {isRest && (
+                            <label className="flex items-center gap-2 bg-gray-50 px-2 py-1 rounded-md border sm:ml-auto"><input type="checkbox" checked={shiftData.canWorkIfNeeded} onChange={() => updateFixedShiftForm(dow, 'canWorkIfNeeded', !shiftData.canWorkIfNeeded)} className="accent-orange-500" /><span className="text-xs font-bold text-gray-600">調整可</span></label>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="bg-white px-5 py-4 flex justify-end gap-3 border-t"><button onClick={() => setFixedShiftForm({...fixedShiftForm, isOpen: false})} className="px-5 py-2.5 font-bold text-gray-600">キャンセル</button><button onClick={saveFixedShift} className="px-6 py-2.5 font-bold bg-emerald-600 text-white rounded-md">保存する</button></div>
+              </div>
+            </div>
+          )}
+
+          {isMailHistoryOpen && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
+              <div className="bg-white rounded-lg w-full max-w-2xl flex flex-col max-h-[90vh]">
+                <div className="bg-gray-800 px-5 py-4 text-white font-bold flex justify-between"><div className="flex gap-2"><Icon name="history" /> 送信履歴</div><button onClick={() => setIsMailHistoryOpen(false)}><Icon name="times" size={20}/></button></div>
+                <div className="p-5 overflow-y-auto space-y-4 bg-gray-50">
+                  {sentMails.length === 0 ? (<div className="text-center py-10 font-bold text-gray-500">履歴はありません</div>) : (
+                    sentMails.map(mail => (
+                      <div key={mail.id} className="bg-white rounded-md border p-4"><div className="flex justify-between mb-3"><span className="font-bold text-blue-800">{mail.type}</span><span className="text-xs text-gray-500">{mail.date}</span></div><div className="mb-3 text-sm"><span className="font-bold text-gray-600">宛先:</span> {mail.targetNames}</div><div className="bg-gray-50 p-3 text-sm text-gray-700 whitespace-pre-wrap border rounded-md">{renderTextWithLink(mail.text)}</div></div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {mailForm.isOpen && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
+              <div className="bg-white rounded-lg w-full max-w-md flex flex-col max-h-[90vh]">
+                <div className="bg-blue-600 px-5 py-4 text-white font-bold flex gap-3"><Icon name="envelope" size={20} /> メール送信</div>
+                <div className="p-5 overflow-y-auto space-y-5">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">宛先</label>
+                    <select value={mailForm.targetMode} onChange={handleTargetModeChange} className="w-full border p-3 rounded-md font-bold"><option value="all">全スタッフ</option><option value="unsubmitted">未提出のみ</option><option value="submitted">提出済のみ</option><option value="individual">個別に選択</option></select>
+                    {mailForm.targetMode === 'individual' && (
+                      <div className="mt-3 border max-h-40 overflow-y-auto bg-gray-50 divide-y">
+                        {staffUsers.filter(u => u.status === 'active').map(u => (
+                          <label key={u.id} className="flex items-center gap-3 p-3">
+                            <input type="checkbox" checked={mailForm.selectedUsers.includes(u.id)} onChange={() => toggleMailUser(u.id)} className="w-4 h-4 accent-blue-600" />
+                            <span className="font-bold text-sm">{getDisplayName(u.name)}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div><label className="block text-sm font-bold text-gray-700 mb-2">種類</label><select value={mailForm.templateId} onChange={e => { const tpl = emailTemplates.find(t => t.id === e.target.value); if(tpl) setMailForm({...mailForm, templateId: tpl.id, type: tpl.name, text: generateMailText(tpl.body)}); }} className="w-full border p-3 rounded-md font-bold">{emailTemplates.map(tpl => <option key={tpl.id} value={tpl.id}>{generateMailText(tpl.name)}</option>)}</select></div>
+                  <div><label className="block text-sm font-bold text-gray-700 mb-2">本文</label><textarea value={mailForm.text} onChange={e => setMailForm({...mailForm, text: e.target.value})} className="w-full border p-3 rounded-md h-40 resize-none" /></div>
+                </div>
+                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t"><button onClick={() => setMailForm({...mailForm, isOpen: false})} className="px-5 py-2.5 font-bold text-gray-600">キャンセル</button><button onClick={handleSendMail} disabled={!mailForm.text.trim() || mailForm.selectedUsers.length === 0} className={`px-6 py-2.5 rounded-md font-bold text-white flex gap-2 items-center ${!mailForm.text.trim() || mailForm.selectedUsers.length === 0 ? 'bg-gray-400' : 'bg-blue-600'}`}><Icon name="paper-plane" /> 送信する</button></div>
+              </div>
+            </div>
+          )}
+
+          {modal.isOpen && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
+              <div className="bg-white rounded-lg w-full max-w-md flex flex-col">
+                <div className="bg-indigo-600 px-5 py-4 text-white font-bold flex gap-3"><Icon name={modal.type === 'daily' ? 'calendar-alt' : 'comment-alt'} size={20} />{modal.type === 'daily' ? `${currentMonth}月${modal.targetId}日のメモ設定` : '個人宛メッセージ'}</div>
+                <div className="p-5"><textarea value={modal.text} onChange={(e) => setModal({ ...modal, text: e.target.value })} className="w-full border p-4 rounded-md h-32 resize-none" /></div>
+                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t"><button onClick={() => setModal({ isOpen: false, type: '', targetId: null, text: '' })} className="px-5 py-2.5 font-bold text-gray-600">キャンセル</button><button onClick={handleSaveModal} className="px-5 py-2.5 rounded-md font-bold bg-indigo-600 text-white">保存する</button></div>
+              </div>
+            </div>
+          )}
+
+          {changeForm.isOpen && (() => {
+            const isSubmitDisabled = !changeForm.confirmedBy || !changeForm.changeCategory || !changeForm.status || !changeForm.reason.trim();
+
+            return (
+              <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
+                <div className="bg-white rounded-lg w-full max-w-md flex flex-col max-h-[90vh]">
+                  <div className="bg-red-600 px-5 py-4 text-white font-bold flex gap-3"><Icon name="edit" size={20} />変更申請</div>
+                  <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-5">
+                    <div><label className="block text-sm font-bold text-gray-700 mb-1.5">対象日</label><select value={changeForm.day} onChange={(e) => handleChangeFormDay(e.target.value)} className="w-full border p-3 rounded-md font-bold">{daysArray.map(d => <option key={d} value={d}>{currentMonth}月{d}日</option>)}</select></div>
+                    <div className="bg-gray-50 rounded-md p-4 border"><p className="text-xs text-gray-500 font-bold mb-1">現在</p><p className="font-bold text-lg">{(() => { const shiftForDay = (currentMonthShifts[currentUser?.id] || {})[changeForm.day]; return shiftForDay ? formatShiftStr(shiftForDay) : '未入力'; })()}</p></div>
+                    <div className="border-t pt-4">
+                      {/* 1. 事前確認管理者 */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-bold text-gray-700 mb-2">
+                          事前確認管理者 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span>
+                        </label>
+                        <select value={changeForm.confirmedBy || ''} onChange={(e) => setChangeForm({...changeForm, confirmedBy: e.target.value})} className="w-full border p-3 rounded-md text-sm">
+                          <option value="">-- 選択してください --</option>
+                          {adminUsersList.map(a => <option key={a.id} value={a.name}>{getDisplayName(a.name)}</option>)}
+                        </select>
+                      </div>
+
+                      {/* 2. 区分 */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-bold text-gray-700 mb-2">
+                          区分 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span>
+                        </label>
+                        <div className="flex gap-2">
+                          {['自己変更', '依頼変更'].map(c => (
+                            <button key={c} onClick={() => setChangeForm({...changeForm, changeCategory: c})} className={`flex-1 rounded-md py-2.5 text-sm font-bold border transition-colors ${changeForm.changeCategory === c ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-300'}`}>{c}</button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 3. 変更後 */}
+                      <label className="block text-sm font-bold text-red-600 mb-3">
+                        変更後 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span>
+                      </label>
+                      <div className="flex gap-2 mb-3">
+                        <button onClick={() => setChangeForm({...changeForm, status: '休'})} className={`flex-1 rounded-md py-2.5 text-sm font-bold border transition-colors ${changeForm.status === '休' ? 'bg-red-500 text-white border-red-500' : 'bg-white text-gray-700 border-gray-300'}`}>休</button>
+                        <button onClick={() => setChangeForm({...changeForm, status: '有休'})} className={`flex-1 rounded-md py-2.5 text-sm font-bold border transition-colors ${changeForm.status === '有休' ? 'bg-teal-500 text-white border-teal-500' : 'bg-white text-gray-700 border-gray-300'}`}>有休</button>
+                        <button onClick={() => setChangeForm({...changeForm, status: '勤務'})} className={`flex-1 rounded-md py-2.5 text-sm font-bold border transition-colors ${changeForm.status === '勤務' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'}`}>勤務</button>
+                      </div>
+
+                      {(changeForm.status === '勤務' || (changeForm.status === '休' && changeForm.canWorkIfNeeded)) && (
+                        <div className="flex items-center gap-2 mb-3">
+                          <select value={changeForm.start} onChange={(e) => setChangeForm({...changeForm, start: e.target.value})} className="flex-1 border p-2.5 rounded-md text-center">{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
+                          <span className="text-gray-400">~</span>
+                          <select value={changeForm.end} onChange={(e) => setChangeForm({...changeForm, end: e.target.value})} className="flex-1 border p-2.5 rounded-md text-center">{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
+                        </div>
+                      )}
+
+                      {changeForm.status === '休' && (
+                        <label className="flex items-center gap-2.5 bg-gray-50 px-3 rounded-md py-2.5 border mb-3 cursor-pointer">
+                          <input type="checkbox" checked={changeForm.canWorkIfNeeded} onChange={() => setChangeForm({...changeForm, canWorkIfNeeded: !changeForm.canWorkIfNeeded})} className="accent-orange-500" />
+                          <span className="text-sm font-bold text-gray-600">出勤調整可能</span>
+                        </label>
+                      )}
+                      
+                      <input type="text" value={changeForm.note || ''} onChange={(e) => setChangeForm({...changeForm, note: e.target.value})} placeholder="備考（任意）" className="w-full border px-4 py-2.5 rounded-md focus:ring-2 focus:ring-red-100 outline-none" />
+                    </div>
+
+                    {/* 4. 変更理由 */}
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-1.5">
+                        変更理由 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span>
+                      </label>
+                      <textarea value={changeForm.reason} onChange={(e) => setChangeForm({...changeForm, reason: e.target.value})} className="w-full border p-3 rounded-md h-24 resize-none focus:ring-2 focus:ring-red-100 outline-none" placeholder="申請の理由を詳しく入力してください" />
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t">
+                    <button onClick={() => setChangeForm({ ...changeForm, isOpen: false })} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-100 rounded-md transition-colors">キャンセル</button>
+                    <button 
+                      onClick={submitChangeRequest} 
+                      disabled={isSubmitDisabled} 
+                      className={`px-6 py-2.5 rounded-md font-bold text-white flex items-center gap-2 transition-all ${isSubmitDisabled ? 'bg-gray-400 cursor-not-allowed opacity-70' : 'bg-red-600 hover:bg-red-700 shadow-md active:scale-95'}`}
+                    >
+                      <Icon name="paper-plane" size={14}/> 申請
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {confirmModal.isOpen && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
+              <div className="bg-white rounded-lg w-full max-w-md flex flex-col">
+                <div className={`${confirmModal.title.includes('エラー') || confirmModal.title.includes('警告') ? 'bg-red-600' : confirmModal.title.includes('完了') ? 'bg-blue-600' : 'bg-yellow-500'} px-5 py-4 text-white font-bold flex gap-2`}><Icon name={confirmModal.title.includes('エラー') || confirmModal.title.includes('警告') ? 'exclamation-triangle' : confirmModal.title.includes('完了') ? 'check-circle' : 'info-circle'} /> {confirmModal.title}</div>
+                <div className="p-6 font-medium space-y-2 whitespace-pre-wrap">{confirmModal.message}</div>
+                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t">
+                  {!confirmModal.isAlert && <button onClick={() => setConfirmModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null, isAlert: false })} className="px-5 py-2.5 font-bold text-gray-600">キャンセル</button>}
+                  <button onClick={() => { if(confirmModal.onConfirm) confirmModal.onConfirm(); setConfirmModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null, isAlert: false }); }} className={`px-6 py-2.5 rounded-md font-bold text-white ${confirmModal.title.includes('エラー') || confirmModal.title.includes('警告') ? 'bg-red-600' : 'bg-blue-600'}`}>{confirmModal.isAlert ? 'OK' : '実行する'}</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
