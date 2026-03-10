@@ -236,7 +236,6 @@
             });
             setShifts(shiftsState); setSubmissionStatus(statusState);
 
-            // ★安全なパース処理
             const dailyNotesState = {};
             (data.dailyNotes || []).forEach(row => {
               const dKey = String(row.dateKey || '');
@@ -262,7 +261,6 @@
 
             setChangeRequests(data.changeRequests || []);
             
-            // ★安全な pendingChanges セット処理
             const initialPending = {};
             (data.changeRequests || []).forEach(req => {
               if (req.status === 'pending' && req.userId) {
@@ -446,7 +444,7 @@
         const updatedUser = { ...tempUser, password: passwordInput };
         fetchGAS('saveRecord', 'users', 'id', updatedUser)
           .then(() => { setIsLoading(false); loginSuccess(updatedUser); })
-          .catch(() => { setIsLoading(false); setLoginError('システムとの接続に失敗しました。'); });
+          .catch(() => { setIsLoading(false); setLoginError('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); });
       };
 
       const handleResetRequestSubmit = (e) => {
@@ -464,12 +462,12 @@
           fetchGAS('saveRecord', 'users', 'id', updatedUser)
             .then(() => {
               setIsLoading(false);
-              showToast('パスワードを初期化しました。初期パスワードでログインしてください。');
+              showToast('パスワードを初期化しました。初期パスワード（社員番号）でログインしてください。');
               goBackToLogin();
             })
             .catch(() => {
               setIsLoading(false);
-              setLoginError('システムエラーが発生しました。');
+              setLoginError('システムエラーが発生しました。通信環境をご確認ください。');
             });
         } else { 
           setIsLoading(false);
@@ -506,7 +504,7 @@
           const hasUnentered = daysArray.some(day => !currentShiftsForSubmit[day] || currentShiftsForSubmit[day].status === '未');
           if (hasUnentered) { setConfirmModal({ isOpen: true, title: '未入力エラー', message: '未入力の日付があります。すべて選択してから提出してください。', isAlert: true, onConfirm: null }); return; }
           const hasMissingTime = daysArray.some(day => { const s = currentShiftsForSubmit[day]; return (s && s.status === '勤務') ? (!s.start || !s.end) : false; });
-          if (hasMissingTime) { setConfirmModal({ isOpen: true, title: '時間未入力エラー', message: '「勤務」の日は、出退勤時間の両方を選択してください。', isAlert: true, onConfirm: null }); return; }
+          if (hasMissingTime) { setConfirmModal({ isOpen: true, title: '時間未入力エラー', message: '「勤務」の日は、出勤時間と退勤時間の両方を選択してください。', isAlert: true, onConfirm: null }); return; }
         }
         
         setIsLoading(true);
@@ -519,7 +517,7 @@
             setConfirmModal({ isOpen: true, title: '処理完了', message: isSubmit ? 'シフトの提出が完了しました。' : 'シフトを一時保存しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
+          .catch(() => { alert('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); setIsLoading(false); });
       };
 
       const handleChangeFormDay = (dayStr) => {
@@ -535,7 +533,6 @@
         setChangeForm({ isOpen: true, day: initialDay, status: currentShift.status === '未' ? '勤務' : currentShift.status, start: currentShift.start || DEFAULT_START_TIME, end: currentShift.end || DEFAULT_END_TIME, canWorkIfNeeded: currentShift.canWorkIfNeeded || false, note: currentShift.note || '', reason: '', changeCategory: '', confirmedBy: '' });
       };
 
-      // ★クラッシュ防止：変更申請時の状態更新を安全に行う
       const submitChangeRequest = () => {
         if (!currentUser) return;
         if (!changeForm.confirmedBy) { showToast('事前確認管理者を選択してください', 'error'); return; }
@@ -546,7 +543,8 @@
         const original = (currentMonthShifts[currentUser.id] || {})[changeForm.day] || { status: '未' };
         const newVal = { status: changeForm.status, start: changeForm.start, end: changeForm.end, canWorkIfNeeded: changeForm.canWorkIfNeeded, note: changeForm.note, changeCategory: changeForm.changeCategory };
         
-        const now = new Date(); const pad = n => String(n).padStart(2, '0');
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
         const createdAtSafe = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
         const newReq = { 
@@ -560,14 +558,21 @@
         fetchGAS('saveRecord', 'changeRequests', 'id', newReq)
           .then(() => {
             setChangeRequests(prev => [newReq, ...prev]);
-            setPendingChanges(prev => ({ ...prev, [currentUser.id]: { ...(prev[currentUser.id] || {}), [changeForm.day]: true } }));
+            setPendingChanges(prev => ({
+              ...prev,
+              [currentUser.id]: {
+                ...(prev[currentUser.id] || {}),
+                [changeForm.day]: true
+              }
+            }));
             setChangeForm(prev => ({ ...prev, isOpen: false }));
-            setConfirmModal({ isOpen: true, title: '申請完了', message: '申請を送信しました。', isAlert: true, onConfirm: null });
+            setConfirmModal({ isOpen: true, title: '申請完了', message: '申請を送信しました。管理者の承認をお待ちください。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
+          .catch(() => { alert('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); setIsLoading(false); });
       };
 
+      // 💡 承認処理の修正
       const handleApprove = (reqId) => {
         setIsLoading(true);
         const req = changeRequests.find(r => r.id === reqId);
@@ -586,14 +591,29 @@
 
         const targetMon = req.targetMonth || activeTargetMonth; 
         const updatedShiftsForUser = { ...((shifts[targetMon] || {})[req.userId] || {}) };
-        updatedReq.changes.forEach(c => { updatedShiftsForUser[c.day] = c.newVal; });
+        
+        // 💡 changes配列が空なら、旧形式のデータを使ってシフト表を更新する
+        if (safeChanges.length > 0) {
+          updatedReq.changes.forEach(c => { updatedShiftsForUser[c.day] = c.newVal; });
+        } else if (req.day && updatedReq.newVal) {
+          updatedShiftsForUser[req.day] = updatedReq.newVal;
+        }
+
         const shiftRecord = { recordId: `${req.userId}_${targetMon}`, userId: req.userId, month: targetMon, status: (submissionStatus[targetMon] || {})[req.userId] || '提出済', shiftData: updatedShiftsForUser };
 
         fetchGAS('saveRecord', 'changeRequests', 'id', updatedReq)
           .then(() => fetchGAS('saveRecord', 'shifts', 'recordId', shiftRecord))
           .then(() => {
             setShifts(prev => ({ ...prev, [targetMon]: { ...(prev[targetMon] || {}), [req.userId]: updatedShiftsForUser } }));
-            setPendingChanges(prev => { const uPending = { ...(prev[req.userId] || {}) }; updatedReq.changes.forEach(c => delete uPending[c.day]); return { ...prev, [req.userId]: uPending }; });
+            setPendingChanges(prev => { 
+              const uPending = { ...(prev[req.userId] || {}) }; 
+              if (safeChanges.length > 0) {
+                updatedReq.changes.forEach(c => delete uPending[c.day]); 
+              } else if (req.day) {
+                delete uPending[req.day];
+              }
+              return { ...prev, [req.userId]: uPending }; 
+            });
             setChangeRequests(prev => prev.map(r => r.id === reqId ? updatedReq : r));
             setApprovalChecks(prev => { const newChecks = { ...prev }; delete newChecks[reqId]; return newChecks; });
             setAdminChangeCategories(prev => { const newC = { ...prev }; delete newC[reqId]; return newC; });
@@ -601,9 +621,10 @@
             setConfirmModal({ isOpen: true, title: '処理完了', message: '承認し、反映しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
+          .catch(() => { alert('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); setIsLoading(false); });
       };
 
+      // 💡 却下処理の修正
       const handleReject = (reqId) => {
         setIsLoading(true);
         const req = changeRequests.find(r => r.id === reqId);
@@ -613,7 +634,15 @@
         fetchGAS('saveRecord', 'changeRequests', 'id', updatedReq)
           .then(() => {
             const safeChanges = Array.isArray(req.changes) ? req.changes : [];
-            setPendingChanges(prev => { const uPending = { ...(prev[req.userId] || {}) }; safeChanges.forEach(c => delete uPending[c.day]); return { ...prev, [req.userId]: uPending }; });
+            setPendingChanges(prev => { 
+              const uPending = { ...(prev[req.userId] || {}) }; 
+              if (safeChanges.length > 0) {
+                safeChanges.forEach(c => delete uPending[c.day]); 
+              } else if (req.day) {
+                delete uPending[req.day];
+              }
+              return { ...prev, [req.userId]: uPending }; 
+            });
             setChangeRequests(prev => prev.map(r => r.id === reqId ? updatedReq : r));
             setApprovalChecks(prev => { const newChecks = { ...prev }; delete newChecks[reqId]; return newChecks; });
             setAdminChangeCategories(prev => { const newC = { ...prev }; delete newC[reqId]; return newC; });
@@ -621,7 +650,7 @@
             setConfirmModal({ isOpen: true, title: '処理完了', message: '却下しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
+          .catch(() => { alert('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); setIsLoading(false); });
       };
 
       const toggleApprovalCheck = (reqId, type) => { setApprovalChecks(prev => { const current = prev[reqId] || { shift: false, kot: false }; return { ...prev, [reqId]: { ...current, [type]: !current[type] } }; }); };
@@ -667,7 +696,13 @@
         fetchGAS('saveRecord', sheetName, keyColumn, record)
           .then(() => {
             if (isDaily) {
-              setDailyNotes(prev => ({ ...prev, [currentMonthStr]: { ...(prev[currentMonthStr] || {}), [modal.targetId]: modal.text } }));
+              setDailyNotes(prev => ({ 
+                ...prev, 
+                [currentMonthStr]: { 
+                  ...(prev[currentMonthStr] || {}), 
+                  [modal.targetId]: modal.text 
+                } 
+              }));
             } else {
               setPersonalNotes(prev => ({ ...prev, [modal.targetId]: modal.text }));
             }
@@ -693,7 +728,12 @@
 
         const newId = `u${Date.now()}`;
         const safeName = newStaff.name || '名称未設定';
-        const newUser = { employeeId: newStaff.employeeId, id: newId, name: safeName, email: newStaff.email, role: newStaff.isAdmin ? 'admin' : 'staff', status: 'active', password: "'" + newStaff.employeeId, employmentCategory: newStaff.employmentCategory };
+        const newUser = { 
+          employeeId: newStaff.employeeId, id: newId, name: safeName, email: newStaff.email, 
+          role: newStaff.isAdmin ? 'admin' : 'staff', status: 'active', 
+          password: "'" + newStaff.employeeId,
+          employmentCategory: newStaff.employmentCategory
+        };
 
         fetchGAS('saveRecord', 'users', 'id', newUser)
           .then(() => {
@@ -827,7 +867,7 @@
       const applyFixedShiftsToMonth = () => {
         setConfirmModal({ isOpen: true, title: '一括自動入力の確認', message: `固定シフトを未入力の日に反映します。よろしいですか？`, isAlert: false, onConfirm: () => {
           setIsLoading(true);
-          const newShifts = JSON.parse(JSON.stringify(shifts));
+          const newShifts = JSON.parse(JSON.stringify(shifts)); // ディープコピーで安全に複製
           if (!newShifts[activeTargetMonth]) newShifts[activeTargetMonth] = {};
           const updatePromises = [];
           
@@ -1340,21 +1380,40 @@
                                     理由: {req.reason}
                                     <span className="text-indigo-600 text-xs mt-1.5 block flex items-center gap-1"><Icon name="user-check"/> 事前確認: {req.confirmedBy}</span>
                                   </p>
+                                  
+                                  {/* 💡 ここが修正部分：新形式(配列)がなくても、旧形式データがあれば補完して表示する */}
                                   <div className="space-y-2">
-                                    {safeChanges.map((c, idx) => (
-                                      <div key={idx} className="text-sm bg-white rounded-md p-3 border border-orange-200 flex items-center gap-3 shadow-sm">
-                                        <span className="font-bold bg-orange-100 rounded-md px-3 py-1.5 text-orange-800">{c.day}日</span> 
-                                        <div className="flex flex-col flex-1">
-                                          <span className="text-gray-500 line-through">{formatShiftStr(c.oldVal)}</span>
-                                          <div className="flex items-center gap-2 mt-1">
-                                            <Icon name="arrow-right" className="text-gray-400" />
-                                            <span className="text-orange-700 font-bold text-base">{formatShiftStr(c.newVal)}</span>
-                                            {c.newVal?.note && <span className="text-gray-500 text-xs ml-2 bg-gray-100 px-2 py-0.5 rounded-md border">備考: {c.newVal.note}</span>}
+                                    {safeChanges.length > 0 ? (
+                                      safeChanges.map((c, idx) => (
+                                        <div key={idx} className="text-sm bg-white rounded-md p-3 border border-orange-200 flex items-center gap-3 shadow-sm">
+                                          <span className="font-bold bg-orange-100 rounded-md px-3 py-1.5 text-orange-800">{c.day}日</span> 
+                                          <div className="flex flex-col flex-1">
+                                            <span className="text-gray-500 line-through">{formatShiftStr(c.oldVal)}</span>
+                                            <div className="flex items-center gap-2 mt-1">
+                                              <Icon name="arrow-right" className="text-gray-400" />
+                                              <span className="text-orange-700 font-bold text-base">{formatShiftStr(c.newVal)}</span>
+                                              {c.newVal?.note && <span className="text-gray-500 text-xs ml-2 bg-gray-100 px-2 py-0.5 rounded-md border">備考: {c.newVal.note}</span>}
+                                            </div>
                                           </div>
                                         </div>
-                                      </div>
-                                    ))}
+                                      ))
+                                    ) : (
+                                      req.day && req.oldVal && req.newVal && (
+                                        <div className="text-sm bg-white rounded-md p-3 border border-orange-200 flex items-center gap-3 shadow-sm">
+                                          <span className="font-bold bg-orange-100 rounded-md px-3 py-1.5 text-orange-800">{req.day}日</span> 
+                                          <div className="flex flex-col flex-1">
+                                            <span className="text-gray-500 line-through">{formatShiftStr(req.oldVal)}</span>
+                                            <div className="flex items-center gap-2 mt-1">
+                                              <Icon name="arrow-right" className="text-gray-400" />
+                                              <span className="text-orange-700 font-bold text-base">{formatShiftStr(req.newVal)}</span>
+                                              {req.newVal?.note && <span className="text-gray-500 text-xs ml-2 bg-gray-100 px-2 py-0.5 rounded-md border">備考: {req.newVal.note}</span>}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )
+                                    )}
                                   </div>
+
                                   <div className="mt-4 bg-white rounded-md p-3.5 border shadow-sm">
                                     <div className="mb-4">
                                       <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-1.5"><Icon name="tag" className="text-indigo-500"/> 区分を確認 <span className="text-red-500 text-xs">*必須</span></label>
@@ -1369,7 +1428,7 @@
                                     <div className="mb-4">
                                       <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-1.5"><Icon name="tag" className="text-indigo-500"/> 勤怠種別を選択 <span className="text-red-500 text-xs">*必須</span></label>
                                       <div className="flex flex-wrap gap-2">
-                                        {['出勤', '遅刻', '早退', '欠勤', '有休', '時間変更'].map(type => (
+                                        {['出勤', '遅刻', '早退', '欠勤', '時間変更', '有休'].map(type => (
                                           <label key={type} className={`cursor-pointer px-3 py-1.5 rounded-md border text-xs font-bold ${attStatus === type ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-50 text-gray-600'}`}>
                                             <input type="radio" className="hidden" checked={attStatus === type} onChange={() => setAdminAttendanceStatuses(prev => ({...prev, [req.id]: type}))} /> {type}
                                           </label>
