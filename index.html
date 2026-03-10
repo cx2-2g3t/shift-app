@@ -68,7 +68,7 @@
 
     function App() {
       // =========================================================
-      // ★ここに新しく発行したGASのウェブアプリURLを貼り付けてください！
+      // 新しいGASのウェブアプリURLを反映済
       // =========================================================
       const GAS_URL = "https://script.google.com/macros/s/AKfycbxbzJxiBjROBm8EUXIYVckjhNnN4QhGqrtr_MCC8ndjLrEzJTiX6qp8FJE1_5QjM1WJ/exec";
 
@@ -84,7 +84,7 @@
             return JSON.parse(text);
           } catch (e) {
             console.error("【GASからの返答内容】\n", text);
-            throw new Error("Googleのセキュリティによってブロックされています（F12キーのConsoleを確認してください）");
+            throw new Error("Googleのセキュリティによってブロックされています");
           }
         })
         .then(data => {
@@ -124,9 +124,9 @@
       const [isConfirmed, setIsConfirmed] = useState(false);
       
       const [dbUsers, setDbUsers] = useState([]);
-      const [shifts, setShifts] = useState({}); // 💡構造を { month: { userId: data } } に変更
-      const [submissionStatus, setSubmissionStatus] = useState({}); // 💡構造を { month: { userId: status } } に変更
-      const [dailyNotes, setDailyNotes] = useState({});
+      const [shifts, setShifts] = useState({}); 
+      const [submissionStatus, setSubmissionStatus] = useState({}); 
+      const [dailyNotes, setDailyNotes] = useState({}); 
       const [personalNotes, setPersonalNotes] = useState({});
       const [adminNotifications, setAdminNotifications] = useState([]);
 
@@ -167,11 +167,12 @@
       const currentMonth = displayDate.getMonth() + 1;
       const currentMonthStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
       
-      // 💡 現在表示中の月のデータと、募集中の月のデータを変数として切り出し
       const currentMonthShifts = shifts[currentMonthStr] || {};
       const currentMonthStatus = submissionStatus[currentMonthStr] || {};
       const activeMonthShifts = shifts[activeTargetMonth] || {};
       const activeMonthStatus = submissionStatus[activeTargetMonth] || {};
+      
+      const currentDailyNotes = dailyNotes[currentMonthStr] || {};
 
       const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
       const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
@@ -189,7 +190,7 @@
       const myStatus = safeUserId ? (activeMonthStatus[safeUserId] || '未提出') : '未提出';
 
       const markMailAsRead = (mail) => {
-        const newReadBy = mail.readBy ? (typeof mail.readBy === 'string' ? JSON.parse(mail.readBy) : mail.readBy) : [];
+        const newReadBy = [...(mail.readBy ? (typeof mail.readBy === 'string' ? JSON.parse(mail.readBy) : mail.readBy) : [])];
         if (!newReadBy.includes(safeUserId)) {
           newReadBy.push(safeUserId);
           const updatedMail = { ...mail, readBy: newReadBy };
@@ -227,7 +228,6 @@
             const isConfirmedObj = settings.find(s => s.key === 'isConfirmed');
             if (isConfirmedObj) setIsConfirmed(isConfirmedObj.value === 'true');
 
-            // 💡 月ごとにデータを分けて保存するように修正
             const shiftsState = {}; const statusState = {};
             (data.shifts || []).forEach(row => {
               if (!shiftsState[row.month]) shiftsState[row.month] = {};
@@ -239,8 +239,11 @@
 
             const dailyNotesState = {};
             (data.dailyNotes || []).forEach(row => {
-              if (row.dateKey && row.dateKey.startsWith(currentMonthStr)) {
-                dailyNotesState[parseInt(row.dateKey.split('-')[2], 10)] = row.note;
+              if (row.dateKey) {
+                const mStr = row.dateKey.substring(0, 7); 
+                const d = parseInt(row.dateKey.split('-')[2], 10);
+                if (!dailyNotesState[mStr]) dailyNotesState[mStr] = {};
+                dailyNotesState[mStr][d] = row.note;
               }
             });
             setDailyNotes(dailyNotesState);
@@ -254,6 +257,23 @@
             setFixedShifts(fixedShiftsState);
 
             setChangeRequests(data.changeRequests || []);
+            
+            // 💡 初期読み込み時に申請中のシフト変更を pendingChanges にセットする処理を追加
+            const initialPending = {};
+            (data.changeRequests || []).forEach(req => {
+              if (req.status === 'pending') {
+                if (!initialPending[req.userId]) initialPending[req.userId] = {};
+                if (req.changes && Array.isArray(req.changes)) {
+                  req.changes.forEach(c => {
+                    initialPending[req.userId][c.day] = true;
+                  });
+                } else if (req.day) {
+                  initialPending[req.userId][req.day] = true;
+                }
+              }
+            });
+            setPendingChanges(initialPending);
+
             setEmailTemplates(data.templates || []);
             setAdminNotifications(data.notifications || []);
             
@@ -272,7 +292,7 @@
             console.log("データの読み込みを行っています...");
             setIsLoading(false);
           });
-      }, [currentMonthStr]); // 💡 月を切り替えた時に再計算されるように追加
+      }, []); 
 
       useEffect(() => {
         const intervalId = setInterval(() => {
@@ -282,6 +302,17 @@
                 setDbUsers(data.users || []);
                 setChangeRequests(data.changeRequests || []);
                 setAdminNotifications(data.notifications || []);
+                
+                const dailyNotesState = {};
+                (data.dailyNotes || []).forEach(row => {
+                  if (row.dateKey) {
+                    const mStr = row.dateKey.substring(0, 7);
+                    const d = parseInt(row.dateKey.split('-')[2], 10);
+                    if (!dailyNotesState[mStr]) dailyNotesState[mStr] = {};
+                    dailyNotesState[mStr][d] = row.note;
+                  }
+                });
+                setDailyNotes(dailyNotesState);
               })
               .catch(() => {});
           }
@@ -498,6 +529,7 @@
         setChangeForm({ isOpen: true, day: initialDay, status: currentShift.status === '未' ? '勤務' : currentShift.status, start: currentShift.start || DEFAULT_START_TIME, end: currentShift.end || DEFAULT_END_TIME, canWorkIfNeeded: currentShift.canWorkIfNeeded || false, note: currentShift.note || '', reason: '', changeCategory: '', confirmedBy: '' });
       };
 
+      // 💡真っ白になる（クラッシュする）原因だった部分を安全な設計に修正
       const submitChangeRequest = () => {
         if (!currentUser) return;
         if (!changeForm.confirmedBy) { showToast('事前確認管理者を選択してください', 'error'); return; }
@@ -507,18 +539,33 @@
         setIsLoading(true);
         const original = (currentMonthShifts[currentUser.id] || {})[changeForm.day] || { status: '未' };
         const newVal = { status: changeForm.status, start: changeForm.start, end: changeForm.end, canWorkIfNeeded: changeForm.canWorkIfNeeded, note: changeForm.note, changeCategory: changeForm.changeCategory };
+        
+        // 日付生成でエラーが起きないよう安全な文字列生成に修正
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const createdAtSafe = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
         const newReq = { 
           id: `req_${Date.now()}`, userId: currentUser.id, userName: getDisplayName(currentUser.name), 
           targetMonth: currentMonthStr,
           changes: [{ day: changeForm.day, oldVal: original, newVal }], 
           day: changeForm.day, oldVal: original, newVal: newVal, reason: changeForm.reason, status: 'pending', 
-          createdAt: new Date().toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute:'2-digit' }), confirmedBy: changeForm.confirmedBy, processedBy: null
+          createdAt: createdAtSafe, confirmedBy: changeForm.confirmedBy, processedBy: null
         };
 
         fetchGAS('saveRecord', 'changeRequests', 'id', newReq)
           .then(() => {
             setChangeRequests(prev => [newReq, ...prev]);
-            setPendingChanges(prev => { const uPending = prev[currentUser.id] || {}; uPending[changeForm.day] = true; return { ...prev, [currentUser.id]: uPending }; });
+            
+            // 💡Reactの厳格なルールに基づき、状態（state）を直接書き換えず安全にコピーして更新するように修正
+            setPendingChanges(prev => ({
+              ...prev,
+              [currentUser.id]: {
+                ...(prev[currentUser.id] || {}),
+                [changeForm.day]: true
+              }
+            }));
+            
             setChangeForm(prev => ({ ...prev, isOpen: false }));
             setConfirmModal({ isOpen: true, title: '申請完了', message: '申請を送信しました。管理者の承認をお待ちください。', isAlert: true, onConfirm: null });
             setIsLoading(false);
@@ -620,8 +667,17 @@
 
         fetchGAS('saveRecord', sheetName, keyColumn, record)
           .then(() => {
-            if (isDaily) setDailyNotes(prev => ({ ...prev, [modal.targetId]: modal.text }));
-            else setPersonalNotes(prev => ({ ...prev, [modal.targetId]: modal.text }));
+            if (isDaily) {
+              setDailyNotes(prev => ({ 
+                ...prev, 
+                [currentMonthStr]: { 
+                  ...(prev[currentMonthStr] || {}), 
+                  [modal.targetId]: modal.text 
+                } 
+              }));
+            } else {
+              setPersonalNotes(prev => ({ ...prev, [modal.targetId]: modal.text }));
+            }
             setModal({ isOpen: false, type: '', targetId: null, text: '' }); showToast('保存しました'); setIsLoading(false);
           }).catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
       };
@@ -783,7 +839,7 @@
       const applyFixedShiftsToMonth = () => {
         setConfirmModal({ isOpen: true, title: '一括自動入力の確認', message: `固定シフトを未入力の日に反映します。よろしいですか？`, isAlert: false, onConfirm: () => {
           setIsLoading(true);
-          const newShifts = { ...shifts }; 
+          const newShifts = JSON.parse(JSON.stringify(shifts)); // ディープコピーで安全に複製
           if (!newShifts[activeTargetMonth]) newShifts[activeTargetMonth] = {};
           const updatePromises = [];
           
@@ -1091,7 +1147,7 @@
                                   <span className={`text-xl sm:text-2xl font-black w-7 sm:w-8 text-right sm:text-center ${getDayColor(day)}`}>{day}</span>
                                   <span className={`text-sm sm:text-base font-bold ${getDayColor(day)}`}>{getDayOfWeek(day)}</span>
                                 </div>
-                                {dailyNotes[day] && <span className="text-xs bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-md leading-tight whitespace-normal break-words max-w-full text-center">{dailyNotes[day]}</span>}
+                                {currentDailyNotes[day] && <span className="text-xs bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-md leading-tight whitespace-normal break-words max-w-full text-center">{currentDailyNotes[day]}</span>}
                               </div>
                               <div className="flex gap-1.5 sm:gap-2 w-full sm:w-auto">
                                 <button onClick={() => updateLocalShift(day, 'status', '未')} disabled={isDisabled} className={`w-full sm:w-[4.5rem] py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-bold transition-colors border ${shiftData.status === '未' ? 'bg-gray-600 text-white border-gray-600 shadow-sm' : `bg-white text-gray-500 border-gray-300 ${isDisabled ? '' : 'hover:bg-gray-50'}`}`}>未</button>
@@ -1155,7 +1211,7 @@
                             <div className="text-center border-b border-gray-100 pb-2">
                               <div className={`text-xl sm:text-2xl font-black ${getDayColor(day)}`}>{day}</div>
                               <div className={`text-xs sm:text-sm font-bold ${getDayColor(day)}`}>{getDayOfWeek(day)}</div>
-                              {dailyNotes[day] && <div className="text-[10px] sm:text-xs bg-red-100 text-red-700 font-bold rounded-md px-1.5 py-0.5 mt-1.5 truncate">{dailyNotes[day]}</div>}
+                              {currentDailyNotes[day] && <div className="text-[10px] sm:text-xs bg-red-100 text-red-700 font-bold rounded-md px-1.5 py-0.5 mt-1.5 truncate">{currentDailyNotes[day]}</div>}
                             </div>
                             <div className="grid grid-cols-2 gap-1 mt-1">
                               <button onClick={() => updateLocalShift(day, 'status', '未')} disabled={rowDisabled} className={`py-1.5 rounded-md text-xs sm:text-sm font-bold border ${s.status === '未' ? 'bg-gray-600 text-white border-gray-600' : 'bg-white border-gray-300 text-gray-500'}`}>未</button>
@@ -1208,7 +1264,7 @@
                                 <div key={day} className={`p-2 sm:p-3 border-r min-h-[140px] flex flex-col relative transition-colors ${isPendingDay ? 'bg-orange-50' : 'hover:bg-blue-50/10'}`}>
                                   {isPendingDay && <div className="absolute top-1 right-1 bg-orange-500 text-white rounded-md text-[10px] sm:text-xs font-bold px-2 py-0.5">申請中</div>}
                                   <div className="flex justify-center items-center mb-2"><span className={`text-base font-black ${getDayColor(day)}`}>{day}</span></div>
-                                  {dailyNotes[day] && <div className="bg-red-50 text-red-600 border border-red-200 rounded-md text-[11px] sm:text-xs font-bold px-2 py-1.5 w-full text-center mb-2">{dailyNotes[day]}</div>}
+                                  {currentDailyNotes[day] && <div className="bg-red-50 text-red-600 border border-red-200 rounded-md text-[11px] sm:text-xs font-bold px-2 py-1.5 w-full text-center mb-2">{currentDailyNotes[day]}</div>}
                                   <div className="mt-auto flex flex-col gap-1.5">
                                     <select value={s.status} onChange={(e) => updateLocalShift(day, 'status', e.target.value)} disabled={rowDisabled} className={`w-full rounded-md text-sm p-1.5 px-0 border text-center ${statusColorClass}`} style={{ textAlignLast: 'center' }}>
                                       <option value="未">未入力</option><option value="休">休 み</option><option value="有休">有 休</option><option value="勤務">勤 務</option>
@@ -1406,10 +1462,10 @@
                               <th rowSpan={2} className="px-4 py-3 sticky left-0 bg-gray-100 z-30 border-r-2 text-center min-w-[160px] text-base">スタッフ</th>
                               {daysArray.map(day => (
                                 <th key={day} colSpan={2} className={`px-2 py-2 text-center min-w-[100px] border-r-2 border-b group relative ${getDayColor(day)} clickable-cell`}>
-                                  <div className="flex flex-col items-center rounded-md gap-1 cursor-pointer hover:bg-gray-200 p-1" onClick={() => setModal({isOpen: true, type: 'daily', targetId: day, text: dailyNotes[day]||''})}>
+                                  <div className="flex flex-col items-center rounded-md gap-1 cursor-pointer hover:bg-gray-200 p-1" onClick={() => setModal({isOpen: true, type: 'daily', targetId: day, text: currentDailyNotes[day]||''})}>
                                     <span className="text-lg leading-none">{day}</span>
                                     <span className="text-xs font-normal leading-none">({getDayOfWeek(day)})</span>
-                                    <span className={`mt-1 rounded-md bg-white border text-[10px] font-bold px-2 py-0.5 shadow-sm opacity-60 group-hover:opacity-100 w-full flex justify-center gap-1 ${dailyNotes[day] ? 'text-indigo-600 border-indigo-300 bg-indigo-50' : 'text-gray-500'}`}><Icon name={dailyNotes[day] ? "pen" : "plus"}/>{dailyNotes[day] ? "メモ編集" : "メモ"}</span>
+                                    <span className={`mt-1 rounded-md bg-white border text-[10px] font-bold px-2 py-0.5 shadow-sm opacity-60 group-hover:opacity-100 w-full flex justify-center gap-1 ${currentDailyNotes[day] ? 'text-indigo-600 border-indigo-300 bg-indigo-50' : 'text-gray-500'}`}><Icon name={currentDailyNotes[day] ? "pen" : "plus"}/>{currentDailyNotes[day] ? "メモ編集" : "メモ"}</span>
                                   </div>
                                 </th>
                               ))}
@@ -1428,8 +1484,8 @@
                               <td className="px-3 py-2 font-bold sticky left-0 bg-gray-50 border-r-2 z-10 text-xs text-gray-500 text-center">日別メモ</td>
                               {daysArray.map(day => (
                                 <td key={`note-${day}`} colSpan={2} className="px-1 py-1 border-r-2 bg-gray-50 align-top max-w-[100px] clickable-cell">
-                                  <div className="w-full h-full rounded-md cursor-pointer hover:bg-gray-100 p-1" onClick={() => setModal({isOpen: true, type: 'daily', targetId: day, text: dailyNotes[day]||''})}>
-                                    {dailyNotes[day] ? (<div className="bg-red-50 rounded-md text-red-600 border border-red-200 text-[11px] font-bold px-2 py-1.5 text-center whitespace-normal break-words">{dailyNotes[day]}</div>) : (<div className="text-[10px] text-gray-300 text-center mt-1">-</div>)}
+                                  <div className="w-full h-full rounded-md cursor-pointer hover:bg-gray-100 p-1" onClick={() => setModal({isOpen: true, type: 'daily', targetId: day, text: currentDailyNotes[day]||''})}>
+                                    {currentDailyNotes[day] ? (<div className="bg-red-50 rounded-md text-red-600 border border-red-200 text-[11px] font-bold px-2 py-1.5 text-center whitespace-normal break-words">{currentDailyNotes[day]}</div>) : (<div className="text-[10px] text-gray-300 text-center mt-1">-</div>)}
                                   </div>
                                 </td>
                               ))}
@@ -1519,12 +1575,12 @@
                             <h3 className="text-lg sm:text-2xl font-black text-indigo-900 min-w-[140px] sm:min-w-[160px] text-center">{currentMonth}月{selectedDay}日 <span className="text-sm sm:text-base font-medium text-indigo-700">({getDayOfWeek(selectedDay)})</span></h3>
                             <button onClick={() => setSelectedDay(Math.min(daysInMonth, selectedDay + 1))} disabled={selectedDay === daysInMonth} className="p-2 sm:p-2.5 rounded-md bg-white border text-indigo-700 disabled:opacity-50"><Icon name="chevron-right" /></button>
                           </div>
-                          <button onClick={() => setModal({isOpen: true, type: 'daily', targetId: selectedDay, text: dailyNotes[selectedDay]||''})} className={`px-4 py-2 sm:py-1.5 text-sm sm:text-xs font-bold rounded-md shadow-sm border flex items-center justify-center gap-1.5 ${dailyNotes[selectedDay] ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white text-gray-600'}`}>
-                            <Icon name={dailyNotes[selectedDay] ? "pen" : "plus"} /> {dailyNotes[selectedDay] ? "メモを編集" : "メモを追加"}
+                          <button onClick={() => setModal({isOpen: true, type: 'daily', targetId: selectedDay, text: currentDailyNotes[selectedDay]||''})} className={`px-4 py-2 sm:py-1.5 text-sm sm:text-xs font-bold rounded-md shadow-sm border flex items-center justify-center gap-1.5 ${currentDailyNotes[selectedDay] ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white text-gray-600'}`}>
+                            <Icon name={currentDailyNotes[selectedDay] ? "pen" : "plus"} /> {currentDailyNotes[selectedDay] ? "メモを編集" : "メモを追加"}
                           </button>
                         </div>
                         
-                        {dailyNotes[selectedDay] && (<div className="bg-red-50 text-red-600 border-b text-sm font-bold px-4 py-2.5 text-center"><Icon name="comment-dots" className="mr-1.5" /> {dailyNotes[selectedDay]}</div>)}
+                        {currentDailyNotes[selectedDay] && (<div className="bg-red-50 text-red-600 border-b text-sm font-bold px-4 py-2.5 text-center"><Icon name="comment-dots" className="mr-1.5" /> {currentDailyNotes[selectedDay]}</div>)}
 
                         <div className="overflow-x-auto no-scrollbar pt-8 pb-24">
                           <div className="min-w-[1100px]">
@@ -1730,239 +1786,4 @@
                         <button onClick={() => openTemplateForm(null)} className="bg-indigo-600 text-white px-4 py-2 font-bold rounded-md flex gap-2"><Icon name="plus" /> 新規追加</button>
                       </div>
                       <div className="p-5 bg-gray-50">
-                        <div className="mb-4 bg-white rounded-md border p-3 text-sm text-gray-600 flex gap-2"><Icon name="info-circle" className="text-blue-500 mt-0.5" /><p>本文に <code className="bg-gray-100 text-red-600 font-bold">{`{month}`}</code> で月、<code className="bg-gray-100 text-red-600 font-bold">{`{deadline}`}</code> で締切日を自動挿入。</p></div>
-                        <div className="grid gap-4 md:grid-cols-2">
-                          {emailTemplates.map(tpl => (
-                            <div key={tpl.id} className="bg-white rounded-md border p-4 flex flex-col h-full group relative">
-                              <div className="flex justify-between items-start mb-3 border-b pb-2">
-                                <h3 className="font-bold text-lg text-gray-800 pr-16">{generateMailText(tpl.name)}</h3>
-                                <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button onClick={() => openTemplateForm(tpl)} className="bg-gray-100 text-gray-600 p-2 rounded-md"><Icon name="pen" /></button>
-                                  <button onClick={() => deleteTemplate(tpl.id)} className="bg-red-50 text-red-600 p-2 rounded-md"><Icon name="trash" /></button>
-                                </div>
-                              </div>
-                              <div className="text-sm text-gray-600 whitespace-pre-wrap flex-1">{renderTextWithLink(generateMailText(tpl.body))}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* モーダル群 */}
-          {templateForm.isOpen && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
-              <div className="bg-white rounded-lg shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
-                <div className="bg-indigo-600 px-5 py-4 text-white font-bold text-lg flex gap-3"><Icon name="pen" size={20} />{templateForm.id.startsWith('t') && emailTemplates.find(t=>t.id === templateForm.id) ? '編集' : '新規追加'}</div>
-                <div className="p-5 space-y-4">
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1.5">件名</label><input type="text" value={templateForm.name} onChange={e => setTemplateForm({...templateForm, name: e.target.value})} className="w-full border p-3 rounded-md focus:ring-2 outline-none" /></div>
-                  <div><label className="block text-sm font-bold text-gray-700 mb-1.5">本文</label><textarea value={templateForm.body} onChange={e => setTemplateForm({...templateForm, body: e.target.value})} className="w-full border p-3 rounded-md h-48 resize-none focus:ring-2 outline-none" /></div>
-                </div>
-                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t">
-                  <button onClick={() => setTemplateForm({ isOpen: false, id: null, name: '', body: '' })} className="px-5 py-2.5 rounded-md font-bold text-gray-600">キャンセル</button>
-                  <button onClick={saveTemplate} className="px-6 py-2.5 rounded-md font-bold bg-indigo-600 text-white">保存する</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {fixedShiftForm.isOpen && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
-              <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
-                <div className="bg-emerald-600 px-5 py-4 text-white font-bold text-lg flex justify-between"><div className="flex gap-3"><Icon name="calendar-day" size={20} />曜日固定 - {fixedShiftForm.userName}</div><button onClick={() => setFixedShiftForm({...fixedShiftForm, isOpen: false})}><Icon name="times" size={20}/></button></div>
-                <div className="overflow-y-auto flex-1">
-                  <div className="divide-y">
-                    {[0, 1, 2, 3, 4, 5, 6].map(dow => {
-                      const shiftData = fixedShiftForm.data[dow]; const isWorking = shiftData.status === '勤務'; const isRest = shiftData.status === '休';
-                      return (
-                        <div key={dow} className={`flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3 p-1.5 sm:px-4 sm:py-2 ${isWorking ? 'bg-blue-50/20' : isRest && shiftData.canWorkIfNeeded ? 'bg-orange-50/20' : 'bg-white'}`}>
-                          <div className="w-full sm:w-16 shrink-0"><span className={`text-lg font-black ${DOW_COLORS[dow]}`}>{DOW_NAMES[dow]}曜</span></div>
-                          <div className="grid grid-cols-3 gap-1 sm:flex sm:gap-2 w-full sm:w-auto">
-                            <button onClick={() => updateFixedShiftForm(dow, 'status', '未')} className={`w-full sm:w-16 py-1 sm:py-1.5 rounded-md font-bold border ${shiftData.status === '未' ? 'bg-gray-600 text-white' : 'bg-white text-gray-500'}`}>未</button>
-                            <button onClick={() => updateFixedShiftForm(dow, 'status', '休')} className={`w-full sm:w-16 py-1 sm:py-1.5 rounded-md font-bold border ${shiftData.status === '休' ? 'bg-red-500 text-white' : 'bg-white text-gray-700'}`}>休</button>
-                            <button onClick={() => updateFixedShiftForm(dow, 'status', '勤務')} className={`w-full sm:w-16 py-1 sm:py-1.5 rounded-md font-bold border ${isWorking ? 'bg-blue-600 text-white' : 'bg-white text-blue-700'}`}>勤務</button>
-                          </div>
-                          {(isWorking || (isRest && shiftData.canWorkIfNeeded)) && (
-                            <div className="flex items-center gap-1.5 sm:ml-auto">
-                              <select value={shiftData.start} onChange={(e) => updateFixedShiftForm(dow, 'start', e.target.value)} className="bg-white border rounded-md py-1 px-0 w-16 text-center">{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
-                              <span>~</span>
-                              <select value={shiftData.end} onChange={(e) => updateFixedShiftForm(dow, 'end', e.target.value)} className="bg-white border rounded-md py-1 px-0 w-16 text-center">{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
-                            </div>
-                          )}
-                          {isRest && (
-                            <label className="flex items-center gap-2 bg-gray-50 px-2 py-1 rounded-md border sm:ml-auto"><input type="checkbox" checked={shiftData.canWorkIfNeeded} onChange={() => updateFixedShiftForm(dow, 'canWorkIfNeeded', !shiftData.canWorkIfNeeded)} className="accent-orange-500" /><span className="text-xs font-bold text-gray-600">調整可</span></label>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div className="bg-white px-5 py-4 flex justify-end gap-3 border-t"><button onClick={() => setFixedShiftForm({...fixedShiftForm, isOpen: false})} className="px-5 py-2.5 font-bold text-gray-600">キャンセル</button><button onClick={saveFixedShift} className="px-6 py-2.5 font-bold bg-emerald-600 text-white rounded-md">保存する</button></div>
-              </div>
-            </div>
-          )}
-
-          {isMailHistoryOpen && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
-              <div className="bg-white rounded-lg w-full max-w-2xl flex flex-col max-h-[90vh]">
-                <div className="bg-gray-800 px-5 py-4 text-white font-bold flex justify-between"><div className="flex gap-2"><Icon name="history" /> 送信履歴</div><button onClick={() => setIsMailHistoryOpen(false)}><Icon name="times" size={20}/></button></div>
-                <div className="p-5 overflow-y-auto space-y-4 bg-gray-50">
-                  {sentMails.length === 0 ? (<div className="text-center py-10 font-bold text-gray-500">履歴はありません</div>) : (
-                    sentMails.map(mail => (
-                      <div key={mail.id} className="bg-white rounded-md border p-4"><div className="flex justify-between mb-3"><span className="font-bold text-blue-800">{mail.type}</span><span className="text-xs text-gray-500">{mail.date}</span></div><div className="mb-3 text-sm"><span className="font-bold text-gray-600">宛先:</span> {mail.targetNames}</div><div className="bg-gray-50 p-3 text-sm text-gray-700 whitespace-pre-wrap border rounded-md">{renderTextWithLink(mail.text)}</div></div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {mailForm.isOpen && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
-              <div className="bg-white rounded-lg w-full max-w-md flex flex-col max-h-[90vh]">
-                <div className="bg-blue-600 px-5 py-4 text-white font-bold flex gap-3"><Icon name="envelope" size={20} /> メール送信</div>
-                <div className="p-5 overflow-y-auto space-y-5">
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">宛先</label>
-                    <select value={mailForm.targetMode} onChange={handleTargetModeChange} className="w-full border p-3 rounded-md font-bold"><option value="all">全スタッフ</option><option value="unsubmitted">未提出のみ</option><option value="submitted">提出済のみ</option><option value="individual">個別に選択</option></select>
-                    {mailForm.targetMode === 'individual' && (
-                      <div className="mt-3 border max-h-40 overflow-y-auto bg-gray-50 divide-y">
-                        {/* 💡ここにあった「自身へテスト送信」を完全に削除しました */}
-                        {staffUsers.filter(u => u.status === 'active').map(u => (
-                          <label key={u.id} className="flex items-center gap-3 p-3">
-                            <input type="checkbox" checked={mailForm.selectedUsers.includes(u.id)} onChange={() => toggleMailUser(u.id)} className="w-4 h-4 accent-blue-600" />
-                            <span className="font-bold text-sm">{getDisplayName(u.name)}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div><label className="block text-sm font-bold text-gray-700 mb-2">種類</label><select value={mailForm.templateId} onChange={e => { const tpl = emailTemplates.find(t => t.id === e.target.value); if(tpl) setMailForm({...mailForm, templateId: tpl.id, type: tpl.name, text: generateMailText(tpl.body)}); }} className="w-full border p-3 rounded-md font-bold">{emailTemplates.map(tpl => <option key={tpl.id} value={tpl.id}>{generateMailText(tpl.name)}</option>)}</select></div>
-                  <div><label className="block text-sm font-bold text-gray-700 mb-2">本文</label><textarea value={mailForm.text} onChange={e => setMailForm({...mailForm, text: e.target.value})} className="w-full border p-3 rounded-md h-40 resize-none" /></div>
-                </div>
-                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t"><button onClick={() => setMailForm({...mailForm, isOpen: false})} className="px-5 py-2.5 font-bold text-gray-600">キャンセル</button><button onClick={handleSendMail} disabled={!mailForm.text.trim() || mailForm.selectedUsers.length === 0} className={`px-6 py-2.5 rounded-md font-bold text-white flex gap-2 items-center ${!mailForm.text.trim() || mailForm.selectedUsers.length === 0 ? 'bg-gray-400' : 'bg-blue-600'}`}><Icon name="paper-plane" /> 送信する</button></div>
-              </div>
-            </div>
-          )}
-
-          {modal.isOpen && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
-              <div className="bg-white rounded-lg w-full max-w-md flex flex-col">
-                <div className="bg-indigo-600 px-5 py-4 text-white font-bold flex gap-3"><Icon name={modal.type === 'daily' ? 'calendar-alt' : 'comment-alt'} size={20} />{modal.type === 'daily' ? `${currentMonth}月${modal.targetId}日のメモ設定` : '個人宛メッセージ'}</div>
-                <div className="p-5"><textarea value={modal.text} onChange={(e) => setModal({ ...modal, text: e.target.value })} className="w-full border p-4 rounded-md h-32 resize-none" /></div>
-                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t"><button onClick={() => setModal({ isOpen: false, type: '', targetId: null, text: '' })} className="px-5 py-2.5 font-bold text-gray-600">キャンセル</button><button onClick={handleSaveModal} className="px-5 py-2.5 rounded-md font-bold bg-indigo-600 text-white">保存する</button></div>
-              </div>
-            </div>
-          )}
-
-          {changeForm.isOpen && (() => {
-            const isSubmitDisabled = !changeForm.confirmedBy || !changeForm.changeCategory || !changeForm.status || !changeForm.reason.trim();
-
-            return (
-              <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
-                <div className="bg-white rounded-lg w-full max-w-md flex flex-col max-h-[90vh]">
-                  <div className="bg-red-600 px-5 py-4 text-white font-bold flex gap-3"><Icon name="edit" size={20} />変更申請</div>
-                  <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-5">
-                    <div><label className="block text-sm font-bold text-gray-700 mb-1.5">対象日</label><select value={changeForm.day} onChange={(e) => handleChangeFormDay(e.target.value)} className="w-full border p-3 rounded-md font-bold">{daysArray.map(d => <option key={d} value={d}>{currentMonth}月{d}日</option>)}</select></div>
-                    <div className="bg-gray-50 rounded-md p-4 border"><p className="text-xs text-gray-500 font-bold mb-1">現在</p><p className="font-bold text-lg">{(() => { const shiftForDay = (currentMonthShifts[currentUser?.id] || {})[changeForm.day]; return shiftForDay ? formatShiftStr(shiftForDay) : '未入力'; })()}</p></div>
-                    <div className="border-t pt-4">
-                      {/* 1. 事前確認管理者 */}
-                      <div className="mb-4">
-                        <label className="block text-sm font-bold text-gray-700 mb-2">
-                          事前確認管理者 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span>
-                        </label>
-                        <select value={changeForm.confirmedBy || ''} onChange={(e) => setChangeForm({...changeForm, confirmedBy: e.target.value})} className="w-full border p-3 rounded-md text-sm">
-                          <option value="">-- 選択してください --</option>
-                          {adminUsersList.map(a => <option key={a.id} value={a.name}>{getDisplayName(a.name)}</option>)}
-                        </select>
-                      </div>
-
-                      {/* 2. 区分 */}
-                      <div className="mb-4">
-                        <label className="block text-sm font-bold text-gray-700 mb-2">
-                          区分 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span>
-                        </label>
-                        <div className="flex gap-2">
-                          {['自己変更', '依頼変更'].map(c => (
-                            <button key={c} onClick={() => setChangeForm({...changeForm, changeCategory: c})} className={`flex-1 rounded-md py-2.5 text-sm font-bold border transition-colors ${changeForm.changeCategory === c ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-300'}`}>{c}</button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* 3. 変更後 */}
-                      <label className="block text-sm font-bold text-red-600 mb-3">
-                        変更後 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span>
-                      </label>
-                      <div className="flex gap-2 mb-3">
-                        <button onClick={() => setChangeForm({...changeForm, status: '休'})} className={`flex-1 rounded-md py-2.5 text-sm font-bold border transition-colors ${changeForm.status === '休' ? 'bg-red-500 text-white border-red-500' : 'bg-white text-gray-700 border-gray-300'}`}>休</button>
-                        <button onClick={() => setChangeForm({...changeForm, status: '有休'})} className={`flex-1 rounded-md py-2.5 text-sm font-bold border transition-colors ${changeForm.status === '有休' ? 'bg-teal-500 text-white border-teal-500' : 'bg-white text-gray-700 border-gray-300'}`}>有休</button>
-                        <button onClick={() => setChangeForm({...changeForm, status: '勤務'})} className={`flex-1 rounded-md py-2.5 text-sm font-bold border transition-colors ${changeForm.status === '勤務' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'}`}>勤務</button>
-                      </div>
-
-                      {(changeForm.status === '勤務' || (changeForm.status === '休' && changeForm.canWorkIfNeeded)) && (
-                        <div className="flex items-center gap-2 mb-3">
-                          <select value={changeForm.start} onChange={(e) => setChangeForm({...changeForm, start: e.target.value})} className="flex-1 border p-2.5 rounded-md text-center">{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
-                          <span className="text-gray-400">~</span>
-                          <select value={changeForm.end} onChange={(e) => setChangeForm({...changeForm, end: e.target.value})} className="flex-1 border p-2.5 rounded-md text-center">{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
-                        </div>
-                      )}
-
-                      {changeForm.status === '休' && (
-                        <label className="flex items-center gap-2.5 bg-gray-50 px-3 rounded-md py-2.5 border mb-3 cursor-pointer">
-                          <input type="checkbox" checked={changeForm.canWorkIfNeeded} onChange={() => setChangeForm({...changeForm, canWorkIfNeeded: !changeForm.canWorkIfNeeded})} className="accent-orange-500" />
-                          <span className="text-sm font-bold text-gray-600">出勤調整可能</span>
-                        </label>
-                      )}
-                      
-                      <input type="text" value={changeForm.note || ''} onChange={(e) => setChangeForm({...changeForm, note: e.target.value})} placeholder="備考（任意）" className="w-full border px-4 py-2.5 rounded-md focus:ring-2 focus:ring-red-100 outline-none" />
-                    </div>
-
-                    {/* 4. 変更理由 */}
-                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-1.5">
-                        変更理由 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span>
-                      </label>
-                      <textarea value={changeForm.reason} onChange={(e) => setChangeForm({...changeForm, reason: e.target.value})} className="w-full border p-3 rounded-md h-24 resize-none focus:ring-2 focus:ring-red-100 outline-none" placeholder="申請の理由を詳しく入力してください" />
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t">
-                    <button onClick={() => setChangeForm({ ...changeForm, isOpen: false })} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-100 rounded-md transition-colors">キャンセル</button>
-                    <button 
-                      onClick={submitChangeRequest} 
-                      disabled={isSubmitDisabled} 
-                      className={`px-6 py-2.5 rounded-md font-bold text-white flex items-center gap-2 transition-all ${isSubmitDisabled ? 'bg-gray-400 cursor-not-allowed opacity-70' : 'bg-red-600 hover:bg-red-700 shadow-md active:scale-95'}`}
-                    >
-                      <Icon name="paper-plane" size={14}/> 申請
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {confirmModal.isOpen && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
-              <div className="bg-white rounded-lg w-full max-w-md flex flex-col">
-                <div className={`${confirmModal.title.includes('エラー') || confirmModal.title.includes('警告') ? 'bg-red-600' : confirmModal.title.includes('完了') ? 'bg-blue-600' : 'bg-yellow-500'} px-5 py-4 text-white font-bold flex gap-2`}><Icon name={confirmModal.title.includes('エラー') || confirmModal.title.includes('警告') ? 'exclamation-triangle' : confirmModal.title.includes('完了') ? 'check-circle' : 'info-circle'} /> {confirmModal.title}</div>
-                <div className="p-6 font-medium space-y-2 whitespace-pre-wrap">{confirmModal.message}</div>
-                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t">
-                  {!confirmModal.isAlert && <button onClick={() => setConfirmModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null, isAlert: false })} className="px-5 py-2.5 font-bold text-gray-600">キャンセル</button>}
-                  <button onClick={() => { if(confirmModal.onConfirm) confirmModal.onConfirm(); setConfirmModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null, isAlert: false }); }} className={`px-6 py-2.5 rounded-md font-bold text-white ${confirmModal.title.includes('エラー') || confirmModal.title.includes('警告') ? 'bg-red-600' : 'bg-blue-600'}`}>{confirmModal.isAlert ? 'OK' : '実行する'}</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
-</body>
-</html>
+                        <div className="mb-4 bg-white rounded-md border p-3 text-sm text-gray-600 flex gap-2"><Icon name="info-
