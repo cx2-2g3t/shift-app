@@ -742,7 +742,7 @@
       const toggleStaffStatus = (userId, name, currentStatus) => {
         if (userId === currentUser?.id) { showToast('自分自身は変更できません', 'error'); return; }
         const newStatus = currentStatus === 'active' ? 'retired' : 'active';
-        setConfirmModal({ isOpen: true, title: '確認', message: `状態を変更します。`, isAlert: false, onConfirm: () => {
+        setConfirmModal({ isOpen: true, title: '確認', message: `退職に変更します。`, isAlert: false, onConfirm: () => {
           setIsLoading(true);
           const updatedUser = { ...dbUsers.find(u => u.id === userId), status: newStatus };
           fetchGAS('saveRecord', 'users', 'id', updatedUser).then(() => { setDbUsers(prev => prev.map(u => u.id === userId ? updatedUser : u)); showToast('更新しました'); setIsLoading(false); })
@@ -759,7 +759,7 @@
         }});
       };
 
-      // 💡 月間コメントもエクスポートされるように追加
+      //  月間コメントもエクスポートされるように追加
       const handleExportCSV = () => {
         let csv = "社員番号,名前,雇用区分,日付,ステータス,出勤,退勤,日別備考,月間コメント\n";
         staffUsers.filter(u => u.status === 'active').forEach(u => {
@@ -1855,7 +1855,7 @@
                                     <div className="flex justify-center gap-2">
                                       {!isRetired && (<div className="tooltip-container"><button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`w-10 h-10 flex justify-center items-center rounded-md border ${personalNotes[user.id] ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-50 text-gray-500'}`}><Icon name="comment-dots" size={18} /></button><span className="tooltip-text">個人宛メッセージ</span></div>)}
                                       {!isRetired && (<div className="tooltip-container"><button onClick={() => openFixedShiftForm(user)} className="w-10 h-10 flex justify-center items-center bg-emerald-50 text-emerald-600 border rounded-md"><Icon name="calendar-day" size={18} /></button><span className="tooltip-text">曜日固定シフト</span></div>)}
-                                      <div className="tooltip-container"><button type="button" onClick={(e) => { e.stopPropagation(); toggleStaffStatus(user.id, user.name, currentStatus); }} className={`w-10 h-10 flex justify-center items-center rounded-md border transition-colors ${isRetired ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-orange-50 text-orange-600 hover:bg-orange-100'}`}><Icon name={isRetired ? 'user-check' : 'door-open'} size={18} /></button><span className="tooltip-text">{isRetired ? '復職' : '退職'}</span></div>
+                                      <div className="tooltip-container"><button type="button" onClick={(e) => { e.stopPropagation(); toggleStaffStatus(user.id, user.name, user.status); }} className={`w-10 h-10 flex justify-center items-center rounded-md border transition-colors ${isRetired ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-orange-50 text-orange-600 hover:bg-orange-100'}`}><Icon name={isRetired ? 'user-check' : 'door-open'} size={18} /></button><span className="tooltip-text">{isRetired ? '復職' : '退職'}</span></div>
                                       <div className="tooltip-container"><button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteStaff(user.id, user.name); }} className="w-10 h-10 flex justify-center items-center text-red-500 hover:bg-red-50 border border-transparent hover:border-red-200 rounded-md transition-colors"><Icon name="trash" size={18} /></button><span className="tooltip-text">削除</span></div>
                                     </div>
                                   </td>
