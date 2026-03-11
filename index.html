@@ -1323,7 +1323,7 @@
                   </div>
                 )}
 
-                {/* 💡 追加：月間コメント入力エリア */}
+                {/* 追加：月間コメント入力エリア */}
                 <div className="bg-white rounded-md shadow-sm mb-24 border border-gray-200 p-4 animate-fade-in">
                   <label className="flex items-center gap-2 text-sm font-bold text-gray-700 mb-2">
                     <Icon name="comment-dots" className="text-blue-500" /> 今月のシフトに関する連絡・希望 (任意)
@@ -1332,7 +1332,6 @@
                     value={myShifts.monthlyNote || ''} 
                     onChange={(e) => updateLocalMonthlyNote(e.target.value)} 
                     disabled={isBaseDisabled}
-                    placeholder="例：テスト期間のため、10日〜15日はお休みを希望します。"
                     className="w-full border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-300 outline-none resize-none h-20"
                   />
                 </div>
