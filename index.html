@@ -28,8 +28,8 @@
     .tooltip-text { 
       visibility: hidden; position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%);
       margin-bottom: 8px; background-color: #1e293b; color: white; text-align: center; 
-      padding: 8px 12px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; width: max-content;
-      max-width: 150px; font-size: 11px; font-weight: bold; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
+      padding: 8px 12px; border-radius: 6px; white-space: normal; min-width: max-content;
+      max-width: 250px; font-size: 12px; font-weight: bold; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
       opacity: 0; transition: opacity 0.2s, visibility 0.2s; pointer-events: none; z-index: 99999;
     }
     .tooltip-container:hover .tooltip-text, .tooltip-container:active .tooltip-text, .tooltip-container:focus-within .tooltip-text { visibility: visible; opacity: 1; }
@@ -66,7 +66,6 @@
     };
 
     function App() {
-      // GASのウェブアプリURL
       const GAS_URL = "https://script.google.com/macros/s/AKfycbxbzJxiBjROBm8EUXIYVckjhNnN4QhGqrtr_MCC8ndjLrEzJTiX6qp8FJE1_5QjM1WJ/exec";
 
       const fetchGAS = (action, ...args) => {
@@ -135,8 +134,7 @@
       const [selectedDay, setSelectedDay] = useState(1);
       
       const [newStaff, setNewStaff] = useState({ employeeId: '', name: '', email: '', isAdmin: false, employmentCategory: '' });
-      const [editStaffForm, setEditStaffForm] = useState({ isOpen: false, user: null, name: '', email: '', employmentCategory: '', isAdmin: false });
-      const [staffSearchQuery, setStaffSearchQuery] = useState('');
+      const [staffSearchQuery, setStaffSearchQuery] = useState(''); 
       const [shiftSearchQuery, setShiftSearchQuery] = useState('');
 
       const [showRetired, setShowRetired] = useState(false);
@@ -445,7 +443,7 @@
         const updatedUser = { ...tempUser, password: passwordInput };
         fetchGAS('saveRecord', 'users', 'id', updatedUser)
           .then(() => { setIsLoading(false); loginSuccess(updatedUser); })
-          .catch(() => { setIsLoading(false); setLoginError('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); });
+          .catch(() => { setIsLoading(false); setLoginError('システムとの接続に失敗しました。'); });
       };
 
       const handleResetRequestSubmit = (e) => {
@@ -463,12 +461,12 @@
           fetchGAS('saveRecord', 'users', 'id', updatedUser)
             .then(() => {
               setIsLoading(false);
-              showToast('パスワードを初期化しました。初期パスワード（社員番号）でログインしてください。');
+              showToast('パスワードを初期化しました。初期パスワードでログインしてください。');
               goBackToLogin();
             })
             .catch(() => {
               setIsLoading(false);
-              setLoginError('システムエラーが発生しました。通信環境をご確認ください。');
+              setLoginError('システムエラーが発生しました。');
             });
         } else { 
           setIsLoading(false);
@@ -499,6 +497,16 @@
         });
       };
 
+      // 💡 月間コメントを保存する処理を追加
+      const updateLocalMonthlyNote = (text) => {
+        if (!currentUser) return;
+        setShifts(prev => {
+          const monthShifts = prev[currentMonthStr] || {};
+          const uShifts = monthShifts[currentUser.id] || {};
+          return { ...prev, [currentMonthStr]: { ...monthShifts, [currentUser.id]: { ...uShifts, monthlyNote: text } } };
+        });
+      };
+
       const handleSubmitShift = (isSubmit = false) => {
         if (isSubmit && currentUser) {
           const currentShiftsForSubmit = activeMonthShifts[currentUser.id] || {};
@@ -518,7 +526,7 @@
             setConfirmModal({ isOpen: true, title: '処理完了', message: isSubmit ? 'シフトの提出が完了しました。' : 'シフトを一時保存しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); setIsLoading(false); });
+          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
       };
 
       const handleChangeFormDay = (dayStr) => {
@@ -567,13 +575,12 @@
               }
             }));
             setChangeForm(prev => ({ ...prev, isOpen: false }));
-            setConfirmModal({ isOpen: true, title: '申請完了', message: '申請を送信しました。管理者の承認をお待ちください。', isAlert: true, onConfirm: null });
+            setConfirmModal({ isOpen: true, title: '申請完了', message: '申請を送信しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); setIsLoading(false); });
+          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
       };
 
-      // 承認処理の修正
       const handleApprove = (reqId) => {
         setIsLoading(true);
         const req = changeRequests.find(r => r.id === reqId);
@@ -593,7 +600,6 @@
         const targetMon = req.targetMonth || activeTargetMonth; 
         const updatedShiftsForUser = { ...((shifts[targetMon] || {})[req.userId] || {}) };
         
-        // changes配列が空なら、旧形式のデータを使ってシフト表を更新する
         if (safeChanges.length > 0) {
           updatedReq.changes.forEach(c => { updatedShiftsForUser[c.day] = c.newVal; });
         } else if (req.day && updatedReq.newVal) {
@@ -622,10 +628,9 @@
             setConfirmModal({ isOpen: true, title: '処理完了', message: '承認し、反映しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); setIsLoading(false); });
+          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
       };
 
-      // 却下処理の修正
       const handleReject = (reqId) => {
         setIsLoading(true);
         const req = changeRequests.find(r => r.id === reqId);
@@ -651,7 +656,7 @@
             setConfirmModal({ isOpen: true, title: '処理完了', message: '却下しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。通信環境をご確認の上、再度お試しください。'); setIsLoading(false); });
+          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
       };
 
       const toggleApprovalCheck = (reqId, type) => { setApprovalChecks(prev => { const current = prev[reqId] || { shift: false, kot: false }; return { ...prev, [reqId]: { ...current, [type]: !current[type] } }; }); };
@@ -691,38 +696,18 @@
         const isDaily = modal.type === 'daily';
         const sheetName = isDaily ? 'dailyNotes' : 'personalNotes';
         const keyColumn = isDaily ? 'dateKey' : 'userId';
+        const saveKey = isDaily ? `${currentMonthStr}-${String(modal.targetId).padStart(2, '0')}` : modal.targetId;
+        const record = { [keyColumn]: saveKey, note: modal.text };
 
-        if (isDaily) {
-          const daysToSave = modal.selectedDays || [modal.targetId];
-          const savePromises = daysToSave.map(day => {
-            const saveKey = `${currentMonthStr}-${String(day).padStart(2, '0')}`;
-            const record = { [keyColumn]: saveKey, note: modal.text };
-            return fetchGAS('saveRecord', sheetName, keyColumn, record);
-          });
-
-          Promise.all(savePromises)
-            .then(() => {
-              setDailyNotes(prev => {
-                const updatedMonth = { ...(prev[currentMonthStr] || {}) };
-                daysToSave.forEach(day => { updatedMonth[day] = modal.text; });
-                return { ...prev, [currentMonthStr]: updatedMonth };
-              });
-              setModal({ isOpen: false, type: '', targetId: null, text: '' }); 
-              showToast('保存しました'); 
-              setIsLoading(false);
-            })
-            .catch(() => { alert('システムとの接続に一部失敗しました。'); setIsLoading(false); });
-        } else {
-          const saveKey = modal.targetId;
-          const record = { [keyColumn]: saveKey, note: modal.text };
-          fetchGAS('saveRecord', sheetName, keyColumn, record)
-            .then(() => {
+        fetchGAS('saveRecord', sheetName, keyColumn, record)
+          .then(() => {
+            if (isDaily) {
+              setDailyNotes(prev => ({ ...prev, [currentMonthStr]: { ...(prev[currentMonthStr] || {}), [modal.targetId]: modal.text } }));
+            } else {
               setPersonalNotes(prev => ({ ...prev, [modal.targetId]: modal.text }));
-              setModal({ isOpen: false, type: '', targetId: null, text: '' }); 
-              showToast('保存しました'); 
-              setIsLoading(false);
-            }).catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
-        }
+            }
+            setModal({ isOpen: false, type: '', targetId: null, text: '' }); showToast('保存しました'); setIsLoading(false);
+          }).catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
       };
 
       const markNotificationAsRead = (id) => {
@@ -730,29 +715,6 @@
         const updatedNote = { ...note, read: true };
         setAdminNotifications(prev => prev.map(n => n.id === id ? updatedNote : n));
         fetchGAS('saveRecord', 'notifications', 'id', updatedNote); 
-      };
-
-      // スタッフ情報の更新処理
-      const handleUpdateStaff = (e) => {
-        e.preventDefault();
-        if (!(editStaffForm.name || '').trim()) { showToast('氏名を入力してください', 'error'); return; }
-
-        setIsLoading(true);
-        const updatedUser = { 
-          ...editStaffForm.user, 
-          name: editStaffForm.name, 
-          email: editStaffForm.email, 
-          employmentCategory: editStaffForm.employmentCategory,
-          role: editStaffForm.isAdmin ? 'admin' : 'staff'
-        };
-
-        fetchGAS('saveRecord', 'users', 'id', updatedUser)
-          .then(() => {
-            setDbUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
-            showToast(`${getDisplayName(updatedUser.name)} さんの情報を更新しました`);
-            setEditStaffForm({ isOpen: false, user: null, name: '', email: '', employmentCategory: '', isAdmin: false });
-            setIsLoading(false);
-          }).catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
       };
 
       const handleAddStaff = (e) => {
@@ -766,12 +728,7 @@
 
         const newId = `u${Date.now()}`;
         const safeName = newStaff.name || '名称未設定';
-        const newUser = { 
-          employeeId: newStaff.employeeId, id: newId, name: safeName, email: newStaff.email, 
-          role: newStaff.isAdmin ? 'admin' : 'staff', status: 'active', 
-          password: "'" + newStaff.employeeId,
-          employmentCategory: newStaff.employmentCategory
-        };
+        const newUser = { employeeId: newStaff.employeeId, id: newId, name: safeName, email: newStaff.email, role: newStaff.isAdmin ? 'admin' : 'staff', status: 'active', password: "'" + newStaff.employeeId, employmentCategory: newStaff.employmentCategory };
 
         fetchGAS('saveRecord', 'users', 'id', newUser)
           .then(() => {
@@ -785,7 +742,7 @@
       const toggleStaffStatus = (userId, name, currentStatus) => {
         if (userId === currentUser?.id) { showToast('自分自身は変更できません', 'error'); return; }
         const newStatus = currentStatus === 'active' ? 'retired' : 'active';
-        setConfirmModal({ isOpen: true, title: '確認', message: `状態を変更します。`, isAlert: false, onConfirm: () => {
+        setConfirmModal({ isOpen: true, title: '確認', message: `退職に変更します。`, isAlert: false, onConfirm: () => {
           setIsLoading(true);
           const updatedUser = { ...dbUsers.find(u => u.id === userId), status: newStatus };
           fetchGAS('saveRecord', 'users', 'id', updatedUser).then(() => { setDbUsers(prev => prev.map(u => u.id === userId ? updatedUser : u)); showToast('更新しました'); setIsLoading(false); })
@@ -802,16 +759,23 @@
         }});
       };
 
+      //  月間コメントもエクスポートされるように追加
       const handleExportCSV = () => {
-        let csv = "社員番号,名前,雇用区分,日付,ステータス,出勤,退勤,備考\n";
+        let csv = "社員番号,名前,雇用区分,日付,ステータス,出勤,退勤,日別備考,月間コメント\n";
         staffUsers.filter(u => u.status === 'active').forEach(u => {
+          const mNote = (currentMonthShifts[u.id]?.monthlyNote || '').replace(/"/g, '""');
+          const mNoteCsv = `"${mNote}"`;
           daysArray.forEach(d => {
             const s = currentMonthShifts[u.id]?.[d] || { status: '未' };
-            csv += `${u.employeeId},${getDisplayName(u.name)},${u.employmentCategory||''},${currentMonth}/${d},${s.status},${s.start || ''},${s.end || ''},${s.note || ''}\n`;
+            const dNote = (s.note || '').replace(/"/g, '""');
+            const dNoteCsv = `"${dNote}"`;
+            csv += `${u.employeeId},"${getDisplayName(u.name)}","${u.employmentCategory||''}",${currentMonth}/${d},${s.status},${s.start || ''},${s.end || ''},${dNoteCsv},${mNoteCsv}\n`;
           });
         });
         const link = document.createElement("a");
-        link.href = URL.createObjectURL(new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv' }));
+        const bom = new Uint8Array([0xEF, 0xBB, 0xBF]); // Excelでの文字化け防止
+        const blob = new Blob([bom, csv], { type: 'text/csv' });
+        link.href = URL.createObjectURL(blob);
         link.download = `シフト_${currentYear}年${currentMonth}月.csv`; link.click(); showToast('ダウンロードしました');
       };
 
@@ -1118,7 +1082,7 @@
                 {!isActiveMonth && (
                   <div className="bg-yellow-50 text-yellow-800 border border-yellow-200 p-4 rounded-md flex items-start gap-3 shadow-sm text-base">
                     <Icon name="shield-alt" size={24} className="shrink-0 mt-0.5" />
-                    <div><p className="font-bold">{currentMonth}月は現在提出期間ではありません。</p><p className="text-sm mt-1">過去のシフトの確認、または次月の希望シフト提出開始をお待ち下さい。</p></div>
+                    <div><p className="font-bold">{currentMonth}月は現在提出期間ではありません。</p><p className="text-sm mt-1">次月の希望シフト提出開始をお待ち下さい。また、過去月のシフト確認ができます。</p></div>
                   </div>
                 )}
 
@@ -1238,7 +1202,7 @@
                               <div className="flex justify-end sm:pl-20 mt-1 w-full sm:w-auto">
                                 <div className="relative w-full sm:w-auto">
                                   <Icon name="comment-dots" className="absolute left-2.5 top-[10px] text-gray-400 text-xs" />
-                                  <input type="text" value={shiftData.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={isDisabled} placeholder="備考 (任意)" className="w-full sm:w-72 bg-white border border-gray-300 text-xs sm:text-sm rounded-md pl-8 pr-3 py-1.5 focus:ring-2 focus:ring-blue-300 outline-none" />
+                                  <input type="text" value={shiftData.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={isDisabled} placeholder="日別備考 (任意)" className="w-full sm:w-72 bg-white border border-gray-300 text-xs sm:text-sm rounded-md pl-8 pr-3 py-1.5 focus:ring-2 focus:ring-blue-300 outline-none" />
                                 </div>
                               </div>
                             )}
@@ -1292,7 +1256,7 @@
                                 <select value={s.end} onChange={(e) => updateLocalShift(day, 'end', e.target.value)} disabled={rowDisabled} className="w-full bg-gray-50 border border-gray-300 rounded-md text-xs sm:text-sm py-1.5 px-0 text-center font-bold appearance-none" style={{textAlignLast:'center'}}>{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t||'--:--'}</option>)}</select>
                               </div>
                             )}
-                            {s.status !== '未' && <input type="text" value={s.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={rowDisabled} placeholder="備考" className="mt-2 bg-white border border-gray-300 rounded-md text-xs p-1.5 text-center focus:ring-1 focus:ring-blue-300 outline-none" />}
+                            {s.status !== '未' && <input type="text" value={s.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={rowDisabled} placeholder="日別備考" className="mt-2 bg-white border border-gray-300 rounded-md text-xs p-1.5 text-center focus:ring-1 focus:ring-blue-300 outline-none" />}
                             {s.status === '休' && !rowDisabled && (
                               <label className="flex items-center cursor-pointer gap-1 justify-center mt-1.5 bg-gray-50 rounded-md p-1.5 border">
                                 <input type="checkbox" className="sr-only peer" checked={s.canWorkIfNeeded} onChange={() => updateLocalShift(day, 'canWorkIfNeeded', !s.canWorkIfNeeded)} />
@@ -1341,7 +1305,7 @@
                                         <select value={s.end} onChange={(e) => updateLocalShift(day, 'end', e.target.value)} disabled={rowDisabled} className="w-full bg-white rounded-md border text-xs sm:text-sm py-1 px-0 text-center" style={{textAlignLast:'center'}}>{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t||'-'}</option>)}</select>
                                       </div>
                                     )}
-                                    {s.status !== '未' && <input type="text" value={s.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={rowDisabled} placeholder="備考" className="bg-white rounded-md border text-xs p-1.5 text-center mt-1" />}
+                                    {s.status !== '未' && <input type="text" value={s.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={rowDisabled} placeholder="日別備考" className="bg-white rounded-md border text-xs p-1.5 text-center mt-1" />}
                                     {s.status === '休' && !rowDisabled && (
                                       <div className="flex items-center justify-center gap-1 mt-1">
                                         <input type="checkbox" checked={s.canWorkIfNeeded} onChange={() => updateLocalShift(day, 'canWorkIfNeeded', !s.canWorkIfNeeded)} className="w-3.5 h-3.5 accent-orange-500" />
@@ -1358,6 +1322,19 @@
                     </div>
                   </div>
                 )}
+
+                {/* 追加：月間コメント入力エリア */}
+                <div className="bg-white rounded-md shadow-sm mb-24 border border-gray-200 p-4 animate-fade-in">
+                  <label className="flex items-center gap-2 text-sm font-bold text-gray-700 mb-2">
+                    <Icon name="comment-dots" className="text-blue-500" /> 今月のシフトに関する連絡・希望 (任意)
+                  </label>
+                  <textarea 
+                    value={myShifts.monthlyNote || ''} 
+                    onChange={(e) => updateLocalMonthlyNote(e.target.value)} 
+                    disabled={isBaseDisabled}
+                    className="w-full border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-300 outline-none resize-none h-20"
+                  />
+                </div>
 
                 <div className="fixed bottom-0 left-0 right-0 p-4 sm:p-5 bg-white border-t border-gray-200 z-50 pb-safe shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.1)]">
                   {!isConfirmed ? (
@@ -1419,7 +1396,6 @@
                                     <span className="text-indigo-600 text-xs mt-1.5 block flex items-center gap-1"><Icon name="user-check"/> 事前確認: {req.confirmedBy}</span>
                                   </p>
                                   
-                                  {/* 新形式(配列)がなくても、旧形式データがあれば補完して表示する */}
                                   <div className="space-y-2">
                                     {safeChanges.length > 0 ? (
                                       safeChanges.map((c, idx) => (
@@ -1543,13 +1519,13 @@
                     </div>
 
                     {shiftViewMode === 'month' && (
-                      <div className="bg-white rounded-md shadow-sm border overflow-x-auto overflow-y-auto max-h-[70vh] no-scrollbar mt-2 relative">
+                      <div className="bg-white rounded-md shadow-sm border overflow-x-auto no-scrollbar pt-4 pb-24 mt-2">
                         <table className="w-full text-left whitespace-nowrap bg-white border-collapse min-w-[1200px]">
-                          <thead className="text-sm text-gray-700 bg-gray-100 border-b-2 sticky top-0 z-[50] shadow-sm">
+                          <thead className="text-sm text-gray-700 bg-gray-100 border-b-2 relative z-20">
                             <tr>
-                              <th rowSpan={2} className="px-4 py-3 sticky left-0 top-0 bg-gray-100 z-[60] border-r-2 text-center min-w-[160px] text-base">スタッフ</th>
+                              <th rowSpan={2} className="px-4 py-3 sticky left-0 bg-gray-100 z-30 border-r-2 text-center min-w-[160px] text-base">スタッフ</th>
                               {daysArray.map(day => (
-                                <th key={day} colSpan={2} className={`px-2 py-2 text-center min-w-[100px] border-r-2 border-b group relative bg-gray-100 ${getDayColor(day)} clickable-cell`}>
+                                <th key={day} colSpan={2} className={`px-2 py-2 text-center min-w-[100px] border-r-2 border-b group relative ${getDayColor(day)} clickable-cell`}>
                                   <div className="flex flex-col items-center rounded-md gap-1 cursor-pointer hover:bg-gray-200 p-1" onClick={() => setModal({isOpen: true, type: 'daily', targetId: day, text: currentDailyNotes[day]||''})}>
                                     <span className="text-lg leading-none">{day}</span>
                                     <span className="text-xs font-normal leading-none">({getDayOfWeek(day)})</span>
@@ -1593,7 +1569,16 @@
                                     <td className="px-3 py-3 font-medium sticky left-0 bg-white border-r-2 z-20">
                                       <div className="flex justify-between items-center mb-1.5 gap-2">
                                         <div className="flex flex-col flex-1 min-w-0">
-                                          <span className="font-bold text-sm truncate" title={getDisplayName(user.name)}>{getDisplayName(user.name)}</span>
+                                          {/* 💡 変更：スタッフ名の横に月間コメントのアイコンを表示 */}
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="font-bold text-sm truncate" title={getDisplayName(user.name)}>{getDisplayName(user.name)}</span>
+                                            {currentMonthShifts[user.id]?.monthlyNote && (
+                                              <div className="tooltip-container cursor-help flex items-center" tabIndex="0">
+                                                <Icon name="comment-alt" className="text-orange-500 text-sm animate-pulse" />
+                                                <span className="tooltip-text text-left font-normal max-w-xs whitespace-pre-wrap">{currentMonthShifts[user.id].monthlyNote}</span>
+                                              </div>
+                                            )}
+                                          </div>
                                           <span className="text-xs text-gray-500 truncate mt-0.5">{user.employmentCategory || '未設定'}</span>
                                         </div>
                                         <button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`p-1.5 rounded-md shrink-0 shadow-sm relative z-30 ${personalNotes[user.id] ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' : 'bg-gray-100 text-gray-400 border border-gray-200'}`}><Icon name="comment-dots" size={14} /></button>
@@ -1604,7 +1589,7 @@
                                       const s = currentMonthShifts[user.id]?.[day] || { status: '未' };
                                       const isPendingCell = pendingChanges[user.id]?.[day]; const cellBg = isPendingCell ? 'bg-orange-50 relative' : '';
                                       if (s.status === '休' && !s.canWorkIfNeeded) return <td key={day} colSpan={2} className={`px-2 py-2 text-center border-r-2 align-middle ${isPendingCell ? 'bg-orange-100 relative' : 'bg-red-50/20'}`}>{isPendingCell && <div className="absolute inset-0 border-2 border-orange-400 pointer-events-none"></div>}<span className="text-red-500 font-bold text-lg relative z-10">休</span></td>;
-                                      if (s.status === '有休') return <td key={day} colSpan={2} className={`px-2 py-2 text-center border-r-2 align-middle ${isPendingCell ? 'bg-orange-100 relative' : 'bg-teal-50/20'}`}>{isPendingCell && <div className="absolute inset-0 border-2 border-orange-400 pointer-events-none"></div>}<span className="text-teal-500 font-bold text-lg relative z-10">有休</span></td>;
+                                      if (s.status === '有休') return <td key={day} colSpan={2} className={`px-2 py-2 text-center border-r-2 align-middle ${isPendingCell ? 'bg-orange-100 relative' : 'bg-teal-50/20'}`}>{isPendingCell && <div className="absolute inset-0 border-2 border-orange-400 pointer-events-none"></div>}<span className="text-teal-600 rounded-md font-bold text-xs bg-teal-50 px-2.5 py-1 border relative z-10">有休</span></td>;
                                       if (s.status === '未') return <td key={day} colSpan={2} className={`px-2 py-2 text-center border-r-2 align-middle ${cellBg}`}>{isPendingCell && <div className="absolute inset-0 border-2 border-orange-400 pointer-events-none"></div>}<span className="text-gray-300 relative z-10 text-lg">-</span></td>;
                                       
                                       return (
@@ -1655,11 +1640,26 @@
                       </div>
                     )}
 
-                    <div className="overflow-x-auto overflow-y-auto max-h-[70vh] no-scrollbar border-t mt-2">
+                    {shiftViewMode === 'day' && (
+                      <div className="bg-white rounded-md shadow-sm border overflow-hidden animate-fade-in mt-2">
+                        <div className="bg-indigo-50 px-4 sm:px-5 py-3 sm:py-4 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-center justify-center sm:justify-start gap-3 sm:gap-4">
+                            <button onClick={() => setSelectedDay(Math.max(1, selectedDay - 1))} disabled={selectedDay === 1} className="p-2 sm:p-2.5 rounded-md bg-white border text-indigo-700 disabled:opacity-50"><Icon name="chevron-left" /></button>
+                            <h3 className="text-lg sm:text-2xl font-black text-indigo-900 min-w-[140px] sm:min-w-[160px] text-center">{currentMonth}月{selectedDay}日 <span className="text-sm sm:text-base font-medium text-indigo-700">({getDayOfWeek(selectedDay)})</span></h3>
+                            <button onClick={() => setSelectedDay(Math.min(daysInMonth, selectedDay + 1))} disabled={selectedDay === daysInMonth} className="p-2 sm:p-2.5 rounded-md bg-white border text-indigo-700 disabled:opacity-50"><Icon name="chevron-right" /></button>
+                          </div>
+                          <button onClick={() => setModal({isOpen: true, type: 'daily', targetId: selectedDay, text: currentDailyNotes[selectedDay]||''})} className={`px-4 py-2 sm:py-1.5 text-sm sm:text-xs font-bold rounded-md shadow-sm border flex items-center justify-center gap-1.5 ${currentDailyNotes[selectedDay] ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white text-gray-600'}`}>
+                            <Icon name={currentDailyNotes[selectedDay] ? "pen" : "plus"} /> {currentDailyNotes[selectedDay] ? "メモを編集" : "メモを追加"}
+                          </button>
+                        </div>
+                        
+                        {currentDailyNotes[selectedDay] && (<div className="bg-red-50 text-red-600 border-b text-sm font-bold px-4 py-2.5 text-center"><Icon name="comment-dots" className="mr-1.5" /> {currentDailyNotes[selectedDay]}</div>)}
+
+                        <div className="overflow-x-auto no-scrollbar pt-8 pb-24">
                           <div className="min-w-[1100px]">
-                            <div className="flex border-b bg-gray-100 text-sm font-bold text-gray-500 sticky top-0 z-[50] shadow-sm">
-                              <div className="w-64 shrink-0 px-5 py-3 border-r text-base bg-gray-100 sticky left-0 z-[60]">スタッフ / 実働時間</div>
-                              <div className="flex-1 flex relative h-10 bg-gray-100">{timeAxis.map(h => <div key={h} className="flex-1 border-r last:border-r-0 pl-1.5 pt-1.5 opacity-70">{h}:00</div>)}</div>
+                            <div className="flex border-b bg-gray-100 text-sm font-bold text-gray-500">
+                              <div className="w-64 shrink-0 px-5 py-3 border-r text-base">スタッフ / 実働時間</div>
+                              <div className="flex-1 flex relative h-10">{timeAxis.map(h => <div key={h} className="flex-1 border-r last:border-r-0 pl-1.5 pt-1.5 opacity-70">{h}:00</div>)}</div>
                             </div>
                             <div className="divide-y divide-gray-100">
                               {filteredShiftUsers.length === 0 ? (
@@ -1672,10 +1672,19 @@
                                   
                                   return (
                                     <div key={user.id} className="flex hover:bg-blue-50/30 items-center group min-h-[4rem] py-2 relative hover:z-30">
-                                      <div className="w-64 shrink-0 px-5 border-r flex flex-col justify-center bg-white sticky left-0 z-30 group-hover:bg-blue-50/50 min-h-[3rem] hover:z-40">
+                                      <div className="w-64 shrink-0 px-5 border-r flex flex-col justify-center bg-white z-10 group-hover:bg-blue-50/50 min-h-[3rem] relative hover:z-40">
                                         <div className="flex items-center justify-between gap-2">
                                           <div className="flex flex-col flex-1 min-w-0">
-                                            <span className="text-base font-bold text-gray-800 truncate" title={getDisplayName(user.name)}>{getDisplayName(user.name)}</span>
+                                            {/* 💡 変更：スタッフ名の横に月間コメントのアイコンを表示 */}
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="text-base font-bold text-gray-800 truncate" title={getDisplayName(user.name)}>{getDisplayName(user.name)}</span>
+                                              {currentMonthShifts[user.id]?.monthlyNote && (
+                                                <div className="tooltip-container cursor-help flex items-center" tabIndex="0">
+                                                  <Icon name="comment-alt" className="text-orange-500 text-sm animate-pulse" />
+                                                  <span className="tooltip-text text-left font-normal max-w-xs whitespace-pre-wrap">{currentMonthShifts[user.id].monthlyNote}</span>
+                                                </div>
+                                              )}
+                                            </div>
                                             <span className="text-[10px] text-gray-500 truncate mt-0.5">{user.employmentCategory || '未設定'}</span>
                                           </div>
                                           <div className="flex items-center gap-1 shrink-0">
@@ -1749,7 +1758,6 @@
                         </thead>
                         <tbody className="divide-y">
                           {(() => {
-                            // ここで「現在表示中の月」の履歴だけに絞り込む
                             const currentMonthHistory = changeRequests.filter(req => req.targetMonth === currentMonthStr);
                             
                             if (currentMonthHistory.length === 0) {
@@ -1821,8 +1829,7 @@
                         <div className="relative w-full max-w-sm"><span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400"><Icon name="search" /></span><input type="text" placeholder="名前、社員番号、雇用区分で検索..." value={staffSearchQuery} onChange={(e) => setStaffSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2 border rounded-md focus:ring-2 outline-none" /></div>
                       </div>
 
-                      {/* PC用テーブル表示 (画面が広い時だけ表示) */}
-                      <div className="hidden md:block overflow-x-auto no-scrollbar">
+                      <div className="overflow-x-auto no-scrollbar">
                         <table className="w-full text-base text-left min-w-[500px]">
                           <thead className="bg-gray-50 text-gray-600 border-y"><tr><th className="px-5 py-4 font-bold">社員番号</th><th className="px-5 py-4 font-bold">氏名 / 雇用区分</th><th className="px-5 py-4 font-bold text-center">提出状況</th><th className="px-5 py-4 font-bold text-center">管理</th></tr></thead>
                           <tbody className="divide-y">
@@ -1833,7 +1840,7 @@
                               if (isConfirmed && pendingChanges[user.id] && Object.keys(pendingChanges[user.id]).length > 0) { stColor = 'bg-orange-100 text-orange-700 border'; stText = '承認待ち'; }
 
                               return (
-                                <tr key={`table-${user.id}`} className={`hover:bg-gray-50 ${isRetired ? 'opacity-50' : ''}`}>
+                                <tr key={user.id} className={`hover:bg-gray-50 ${isRetired ? 'opacity-50' : ''}`}>
                                   <td className="px-5 py-4 font-mono text-gray-600 font-bold">{user.employeeId}</td>
                                   <td className="px-5 py-4">
                                     <div className="flex items-center flex-wrap gap-2 font-bold text-gray-800">
@@ -1843,10 +1850,9 @@
                                     </div>
                                     <div className="text-xs text-gray-500 mt-1">{user.employmentCategory || '未設定'}</div>
                                   </td>
-                                  <td className="px-5 py-4 text-center align-middle">{!isRetired ? <span className={`inline-block whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-bold ${stColor}`}>{stText}</span> : '-'}</td>
+                                  <td className="px-5 py-4 text-center">{!isRetired ? <span className={`px-3 py-1.5 rounded-md text-xs font-bold ${stColor}`}>{stText}</span> : '-'}</td>
                                   <td className="px-5 py-4">
                                     <div className="flex justify-center gap-2">
-                                      {!isRetired && (<div className="tooltip-container"><button type="button" onClick={(e) => { e.stopPropagation(); setEditStaffForm({ isOpen: true, user: user, name: getDisplayName(user.name), email: user.email || '', employmentCategory: user.employmentCategory || '', isAdmin: user.role === 'admin' }); }} className="w-10 h-10 flex justify-center items-center rounded-md border shadow-sm bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"><Icon name="pen" size={16} /></button><span className="tooltip-text">情報編集</span></div>)}
                                       {!isRetired && (<div className="tooltip-container"><button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`w-10 h-10 flex justify-center items-center rounded-md border ${personalNotes[user.id] ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-50 text-gray-500'}`}><Icon name="comment-dots" size={18} /></button><span className="tooltip-text">個人宛メッセージ</span></div>)}
                                       {!isRetired && (<div className="tooltip-container"><button onClick={() => openFixedShiftForm(user)} className="w-10 h-10 flex justify-center items-center bg-emerald-50 text-emerald-600 border rounded-md"><Icon name="calendar-day" size={18} /></button><span className="tooltip-text">曜日固定シフト</span></div>)}
                                       <div className="tooltip-container"><button type="button" onClick={(e) => { e.stopPropagation(); toggleStaffStatus(user.id, user.name, user.status); }} className={`w-10 h-10 flex justify-center items-center rounded-md border transition-colors ${isRetired ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-orange-50 text-orange-600 hover:bg-orange-100'}`}><Icon name={isRetired ? 'user-check' : 'door-open'} size={18} /></button><span className="tooltip-text">{isRetired ? '復職' : '退職'}</span></div>
@@ -1858,42 +1864,6 @@
                             })}
                           </tbody>
                         </table>
-                      </div>
-
-                      {/* スマホ用カード表示 (画面が狭い時だけ表示) */}
-                      <div className="md:hidden flex flex-col gap-3">
-                        {filteredDbUsers.filter(u => u.employeeId !== '9999').filter(u => showRetired || u.status === 'active').map(user => {
-                          const isRetired = user.status === 'retired';
-                          let stText = activeMonthStatus[user.id] || '未提出'; let stColor = 'bg-gray-100 text-gray-600';
-                          if (stText === '提出済') stColor = 'bg-green-100 text-green-700'; else if (stText === '途中保存') stColor = 'bg-yellow-100 text-yellow-700';
-                          if (isConfirmed && pendingChanges[user.id] && Object.keys(pendingChanges[user.id]).length > 0) { stColor = 'bg-orange-100 text-orange-700 border'; stText = '承認待ち'; }
-
-                          return (
-                            <div key={`card-${user.id}`} className={`border rounded-md p-4 bg-white shadow-sm flex flex-col gap-3 ${isRetired ? 'opacity-60 bg-gray-50' : ''}`}>
-                              <div className="flex justify-between items-start gap-2">
-                                <div className="flex flex-col">
-                                  <div className="flex items-center flex-wrap gap-2 font-bold text-gray-800 text-base">
-                                    <span>{getDisplayName(user.name)}</span>
-                                    {user.role === 'admin' && <span className="text-[10px] bg-indigo-100 text-indigo-700 border px-2 py-0.5 rounded-full">管理者</span>}
-                                    {isRetired && <span className="text-[10px] bg-gray-200 text-gray-600 border px-2 py-0.5 rounded-full">退職済</span>}
-                                  </div>
-                                  <div className="text-xs text-gray-500 mt-1 font-mono">ID: {user.employeeId} / {user.employmentCategory || '未設定'}</div>
-                                </div>
-                                <div className="shrink-0 mt-0.5">
-                                  {!isRetired ? <span className={`inline-block whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-bold ${stColor}`}>{stText}</span> : <span className="text-gray-400 text-sm font-bold">-</span>}
-                                </div>
-                              </div>
-                              
-                              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 mt-1">
-                                {!isRetired && (<button type="button" onClick={(e) => { e.stopPropagation(); setEditStaffForm({ isOpen: true, user: user, name: getDisplayName(user.name), email: user.email || '', employmentCategory: user.employmentCategory || '', isAdmin: user.role === 'admin' }); }} className="w-10 h-10 flex justify-center items-center rounded-md border shadow-sm bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"><Icon name="pen" size={16} /></button>)}
-                                {!isRetired && (<button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`w-10 h-10 flex justify-center items-center rounded-md border shadow-sm ${personalNotes[user.id] ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-gray-50 text-gray-500'}`}><Icon name="comment-dots" size={18} /></button>)}
-                                {!isRetired && (<button onClick={() => openFixedShiftForm(user)} className="w-10 h-10 flex justify-center items-center bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-md shadow-sm"><Icon name="calendar-day" size={18} /></button>)}
-                                <button type="button" onClick={(e) => { e.stopPropagation(); toggleStaffStatus(user.id, user.name, user.status); }} className={`w-10 h-10 flex justify-center items-center rounded-md border shadow-sm transition-colors ${isRetired ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-orange-50 text-orange-600 hover:bg-orange-100 border-orange-200'}`}><Icon name={isRetired ? 'user-check' : 'door-open'} size={18} /></button>
-                                <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteStaff(user.id, user.name); }} className="w-10 h-10 flex justify-center items-center text-red-500 hover:bg-red-50 border shadow-sm hover:border-red-200 rounded-md transition-colors"><Icon name="trash" size={18} /></button>
-                              </div>
-                            </div>
-                          );
-                        })}
                       </div>
                     </div>
                   </div>
@@ -2028,50 +1998,10 @@
 
           {modal.isOpen && (
             <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
-              <div className="bg-white rounded-lg w-full max-w-md flex flex-col max-h-[90vh]">
-                <div className="bg-indigo-600 px-5 py-4 text-white font-bold flex gap-3 shrink-0"><Icon name={modal.type === 'daily' ? 'calendar-alt' : 'comment-alt'} size={20} />{modal.type === 'daily' ? `${currentMonth}月のメモ設定` : '個人宛メッセージ'}</div>
-                <div className="p-4 sm:p-5 overflow-y-auto flex-1">
-                  {modal.type === 'daily' && (
-                    <div className="mb-4">
-                      <p className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-1"><Icon name="check-square" className="text-indigo-500"/> 同じメモを他の日にも適用する</p>
-                      <div className="border rounded-md p-2 bg-gray-50 shadow-inner">
-                        <div className="grid grid-cols-7 gap-1 text-center mb-1">
-                          {['日','月','火','水','木','金','土'].map((dow, i) => (<div key={dow} className={`text-[10px] font-bold ${i===0?'text-red-500':i===6?'text-blue-500':'text-gray-500'}`}>{dow}</div>))}
-                        </div>
-                        {weeks.map((week, wIdx) => (
-                          <div key={wIdx} className="grid grid-cols-7 gap-1 mb-1 last:mb-0">
-                            {week.map((d, dIdx) => {
-                              if (!d) return <div key={`empty-${dIdx}`} className="p-1"></div>;
-                              const isSelected = (modal.selectedDays || [modal.targetId]).includes(d);
-                              return (
-                                <button 
-                                  key={d} 
-                                  onClick={() => {
-                                    const currentSelected = modal.selectedDays || [modal.targetId];
-                                    let newSelected;
-                                    if (currentSelected.includes(d)) {
-                                      if (currentSelected.length === 1) return; // 最後の1個は消せない
-                                      newSelected = currentSelected.filter(day => day !== d);
-                                    } else {
-                                      newSelected = [...currentSelected, d].sort((a,b)=>a-b);
-                                    }
-                                    setModal({ ...modal, selectedDays: newSelected });
-                                  }}
-                                  className={`py-1.5 text-xs font-bold rounded-md transition-colors ${isSelected ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-gray-300 text-gray-700 hover:bg-indigo-50'}`}
-                                >
-                                  {d}
-                                </button>
-                              )
-                            })}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <p className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-1"><Icon name="pen" className="text-indigo-500"/> メモ内容</p>
-                  <textarea value={modal.text} onChange={(e) => setModal({ ...modal, text: e.target.value })} placeholder="入力してください" className="w-full border border-gray-300 p-4 rounded-md h-32 resize-none focus:ring-2 focus:ring-indigo-300 outline-none" />
-                </div>
-                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t shrink-0"><button onClick={() => setModal({ isOpen: false, type: '', targetId: null, text: '' })} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-100 rounded-md transition-colors">キャンセル</button><button onClick={handleSaveModal} className="px-6 py-2.5 rounded-md font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-colors">保存する</button></div>
+              <div className="bg-white rounded-lg w-full max-w-md flex flex-col">
+                <div className="bg-indigo-600 px-5 py-4 text-white font-bold flex gap-3"><Icon name={modal.type === 'daily' ? 'calendar-alt' : 'comment-alt'} size={20} />{modal.type === 'daily' ? `${currentMonth}月${modal.targetId}日のメモ設定` : '個人宛メッセージ'}</div>
+                <div className="p-5"><textarea value={modal.text} onChange={(e) => setModal({ ...modal, text: e.target.value })} className="w-full border p-4 rounded-md h-32 resize-none" /></div>
+                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t"><button onClick={() => setModal({ isOpen: false, type: '', targetId: null, text: '' })} className="px-5 py-2.5 font-bold text-gray-600">キャンセル</button><button onClick={handleSaveModal} className="px-5 py-2.5 rounded-md font-bold bg-indigo-600 text-white">保存する</button></div>
               </div>
             </div>
           )}
@@ -2149,49 +2079,6 @@
               </div>
             );
           })()}
-
-          {/* 追加：スタッフ情報編集モーダル */}
-          {editStaffForm.isOpen && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
-              <div className="bg-white rounded-lg shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
-                <div className="bg-indigo-600 px-5 py-4 text-white font-bold text-lg flex justify-between items-center shrink-0">
-                  <div className="flex gap-3 items-center"><Icon name="user-edit" size={20} />スタッフ情報編集</div>
-                  <button onClick={() => setEditStaffForm({ ...editStaffForm, isOpen: false })}><Icon name="times" size={20}/></button>
-                </div>
-                <div className="p-5 overflow-y-auto flex-1">
-                  <form id="editStaffForm" onSubmit={handleUpdateStaff} className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-1.5">社員番号 <span className="text-gray-400 font-normal text-xs">(変更不可)</span></label>
-                      <input type="text" value={editStaffForm.user?.employeeId || ''} disabled className="w-full rounded-md border p-3 bg-gray-100 text-gray-500 cursor-not-allowed font-mono" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-1.5">氏名 <span className="text-red-500 text-xs">※必須</span></label>
-                      <input type="text" required value={editStaffForm.name} onChange={e => setEditStaffForm({...editStaffForm, name: e.target.value})} className="w-full rounded-md border p-3 focus:ring-2 focus:ring-indigo-300 outline-none" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-1.5">メールアドレス</label>
-                      <input type="email" value={editStaffForm.email} onChange={e => setEditStaffForm({...editStaffForm, email: e.target.value})} className="w-full rounded-md border p-3 focus:ring-2 focus:ring-indigo-300 outline-none" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-1.5">雇用区分</label>
-                      <input type="text" placeholder="例：A契約、Type4..." value={editStaffForm.employmentCategory} onChange={(e) => setEditStaffForm({ ...editStaffForm, employmentCategory: e.target.value })} className="w-full rounded-md border p-3 focus:ring-2 focus:ring-indigo-300 outline-none" />
-                    </div>
-                    <div className="pt-2 border-t mt-4">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={editStaffForm.isAdmin} onChange={e => setEditStaffForm({...editStaffForm, isAdmin: e.target.checked})} className="w-5 h-5 accent-indigo-600" />
-                        <span className="text-sm font-bold text-gray-800">管理者権限を付与する</span>
-                      </label>
-                      <p className="text-[11px] text-gray-500 mt-1 ml-7">このユーザーも管理画面を見れるようになります。</p>
-                    </div>
-                  </form>
-                </div>
-                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t shrink-0">
-                  <button type="button" onClick={() => setEditStaffForm({ ...editStaffForm, isOpen: false })} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-100 rounded-md transition-colors">キャンセル</button>
-                  <button type="submit" form="editStaffForm" className="px-6 py-2.5 font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-colors shadow-sm">更新する</button>
-                </div>
-              </div>
-            </div>
-          )}
 
           {confirmModal.isOpen && (
             <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
