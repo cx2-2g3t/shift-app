@@ -9,9 +9,17 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/mobile-drag-drop/index.min.js"></script>
+  <script src="https://unpkg.com/mobile-drag-drop/scroll-behaviour.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/mobile-drag-drop/default.css">
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      MobileDragDrop.polyfill({ dragImageTranslateOverride: MobileDragDrop.scrollBehaviourDragImageTranslateOverride });
+    });
+  </script>
 
   <style>
-    body { -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; padding: 0; min-height: 100vh; -webkit-tap-highlight-color: transparent; background-color: #f3f4f6; }
     .animate-fade-in { animation: fadeIn 0.3s ease-in-out; }
     .animate-fade-in-down { animation: fadeInDown 0.3s ease-in-out; }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -27,22 +35,21 @@
     .tooltip-container:hover { z-index: 99999; }
     .tooltip-text { 
       visibility: hidden; position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%);
-      margin-bottom: 8px; background-color: #1e293b; color: white; text-align: center; 
-      padding: 8px 12px; border-radius: 6px; white-space: normal; min-width: max-content;
-      max-width: 250px; font-size: 12px; font-weight: bold; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
+      margin-bottom: 8px; background-color: #1e293b; color: white; text-align: left; 
+      padding: 8px 12px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; width: max-content;
+      max-width: 150px; font-size: 11px; font-weight: bold; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
       opacity: 0; transition: opacity 0.2s, visibility 0.2s; pointer-events: none; z-index: 99999;
     }
     .tooltip-container:hover .tooltip-text, .tooltip-container:active .tooltip-text, .tooltip-container:focus-within .tooltip-text { visibility: visible; opacity: 1; }
     .tooltip-text::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px; border-width: 6px; border-style: solid; border-color: #1e293b transparent transparent transparent; }
+    .tooltip-left .tooltip-text { left: 0; transform: none; text-align: left; }
+    .tooltip-left .tooltip-text::after { left: 15px; margin-left: 0; }
     .input-flat { border: none; border-bottom: 2px solid #cbd5e1; border-radius: 0; background: transparent; padding: 12px 8px; transition: border-color 0.2s ease; }
     .input-flat:focus { outline: none; border-bottom-color: #2563eb; box-shadow: none; }
     .clickable-cell { position: relative; z-index: 20; }
   </style>
 </head>
-<body class="bg-gray-100 font-sans antialiased text-gray-800">
-  <div id="root"></div>
-
-  <script type="text/babel">
+<body class="bg-gray-100 font-sans antialiased text-gray-800"><div id="root"></div><script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
     const DEFAULT_START_TIME = '';
@@ -69,6 +76,15 @@
       const GAS_URL = "https://script.google.com/macros/s/AKfycbxbzJxiBjROBm8EUXIYVckjhNnN4QhGqrtr_MCC8ndjLrEzJTiX6qp8FJE1_5QjM1WJ/exec";
 
       const fetchGAS = (action, ...args) => {
+        // オフライン環境（社員番号1111）の時は通信せずに成功したフリをする
+        if (employeeIdInput === '1111' || (currentUser && currentUser.employeeId === '1111')) {
+          return new Promise(resolve => setTimeout(() => {
+            if (action === 'verifyLogin') resolve({ success: true, user: { id: 'd_1111', employeeId: '1111', name: 'オフラインテスト', role: 'admin', status: 'active', employmentCategory: 'SV' } });
+            else if (action === 'getInitialData') resolve({ users: [{ id: 'd_1111', employeeId: '1111', name: 'オフラインテスト', role: 'admin', status: 'active', employmentCategory: 'SV' }], settings: [], shifts: [], dailyNotes: [], personalNotes: [], fixedShifts: [], changeRequests: [], templates: [], notifications: [], mailHistory: [] });
+            else resolve({ success: true });
+          }, 300));
+        }
+
         return fetch(GAS_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
@@ -126,7 +142,7 @@
       const [personalNotes, setPersonalNotes] = useState({});
       const [adminNotifications, setAdminNotifications] = useState([]);
 
-      const [modal, setModal] = useState({ isOpen: false, type: '', targetId: null, text: '' });
+      const [modal, setModal] = useState({ isOpen: false, type: '', targetId: null, text: '', selectedDays: [] });
       const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, isAlert: false });
       const [adminTab, setAdminTab] = useState('shift'); 
       
@@ -134,7 +150,9 @@
       const [selectedDay, setSelectedDay] = useState(1);
       
       const [newStaff, setNewStaff] = useState({ employeeId: '', name: '', email: '', isAdmin: false, employmentCategory: '' });
-      const [staffSearchQuery, setStaffSearchQuery] = useState(''); 
+      const [editStaffForm, setEditStaffForm] = useState({ isOpen: false, user: null, name: '', email: '', employmentCategory: '', isAdmin: false });
+      const [displayFilter, setDisplayFilter] = useState('all'); // 'all', 'admin', 'staff'
+      const [staffSearchQuery, setStaffSearchQuery] = useState('');
       const [shiftSearchQuery, setShiftSearchQuery] = useState('');
 
       const [showRetired, setShowRetired] = useState(false);
@@ -173,8 +191,8 @@
       const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
       const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
-      const staffUsers = useMemo(() => dbUsers.filter(u => u.employeeId !== '9999'), [dbUsers]);
-      const adminUsersList = useMemo(() => dbUsers.filter(u => u.role === 'admin' && u.status === 'active' && u.employeeId !== '9999'), [dbUsers]);
+      const staffUsers = useMemo(() => dbUsers.filter(u => u.employeeId !== '9999').sort((a,b) => (a.displayOrder || 999) - (b.displayOrder || 999)), [dbUsers]);
+      const adminUsersList = useMemo(() => dbUsers.filter(u => u.role === 'admin' && u.status === 'active' && u.employeeId !== '9999').sort((a,b) => (a.displayOrder || 999) - (b.displayOrder || 999)), [dbUsers]);
       
       const pendingReqs = useMemo(() => changeRequests.filter(req => req.status === 'pending'), [changeRequests]);
       const isActiveMonth = currentMonthStr === activeTargetMonth;
@@ -371,6 +389,8 @@
         let confirmed = 0, possible = 0;
         staffUsers.forEach(u => {
           if (u.status === 'retired') return; 
+          if (displayFilter === 'admin' && u.role !== 'admin') return;
+          if (displayFilter === 'staff' && u.role !== 'staff') return;
           const s = currentMonthShifts[u.id]?.[day]; if (!s) return;
           if (s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded)) {
             const details = calculateShiftDetails(s.start, s.end); if (details.hours === 0) return;
@@ -385,6 +405,8 @@
       const getDailySummary = (day) => {
         let confirmed = 0; let possible = 0; let totalHours = 0;
         staffUsers.filter(u => u.status === 'active').forEach(u => {
+          if (displayFilter === 'admin' && u.role !== 'admin') return;
+          if (displayFilter === 'staff' && u.role !== 'staff') return;
           const s = currentMonthShifts[u.id]?.[day];
           if (s) {
             if (s.status === '勤務') { confirmed++; const details = calculateShiftDetails(s.start, s.end); totalHours += details.hours; }
@@ -393,6 +415,56 @@
         });
         return { confirmed, possible, totalHours };
       };
+
+      // ドラッグ＆ドロップ用の状態と処理
+      const [draggedStaffId, setDraggedStaffId] = useState(null);
+      const [dragOverStaffId, setDragOverStaffId] = useState(null);
+
+      const onDragStart = (e, id) => {
+        setDraggedStaffId(id);
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', id);
+      };
+      const onDragOver = (e, id) => {
+        e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+        if (dragOverStaffId !== id) setDragOverStaffId(id);
+      };
+      const onDragLeave = (e, id) => {
+        e.preventDefault();
+        if (dragOverStaffId === id) setDragOverStaffId(null);
+      };
+      const onDrop = (e, targetId) => {
+        e.preventDefault(); setDragOverStaffId(null);
+        if (!draggedStaffId || draggedStaffId === targetId) return;
+
+        setIsLoading(true);
+        let list = [...dbUsers.filter(u => u.employeeId !== '9999')].sort((a,b) => (a.displayOrder || 999) - (b.displayOrder || 999));
+        list = list.map((u, i) => ({ ...u, tempOrder: u.displayOrder != null ? u.displayOrder : i * 1000 }));
+        
+        const draggedIdx = list.findIndex(u => u.id === draggedStaffId);
+        const targetIdx = list.findIndex(u => u.id === targetId);
+        if(draggedIdx < 0 || targetIdx < 0) { setIsLoading(false); return; }
+        
+        const draggedItem = list[draggedIdx];
+        list.splice(draggedIdx, 1);
+        list.splice(targetIdx, 0, draggedItem); // 並び替え実行
+        
+        const prevItem = list[targetIdx - 1]; const nextItem = list[targetIdx + 1];
+        let newOrder;
+        if (!prevItem) newOrder = nextItem.tempOrder - 1000;
+        else if (!nextItem) newOrder = prevItem.tempOrder + 1000;
+        else newOrder = (prevItem.tempOrder + nextItem.tempOrder) / 2; // 間の数値を計算
+        
+        if (prevItem && newOrder === prevItem.tempOrder) newOrder += 0.1; // 重複回避
+        
+        const finalUpdatedUser = { ...dbUsers.find(u => u.id === draggedItem.id), displayOrder: newOrder };
+        setDbUsers(prev => prev.map(u => u.id === finalUpdatedUser.id ? finalUpdatedUser : u));
+        
+        fetchGAS('saveRecord', 'users', 'id', finalUpdatedUser)
+          .then(() => setIsLoading(false)).catch(() => { alert('通信エラー'); setIsLoading(false); });
+        setDraggedStaffId(null);
+      };
+      const onDragEnd = () => { setDraggedStaffId(null); setDragOverStaffId(null); };
 
       const changeMonth = (offset) => { setDisplayDate(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1)); setSelectedDay(1); setCurrentWeekIndex(0); };
 
@@ -497,7 +569,6 @@
         });
       };
 
-      // 💡 月間コメントを保存する処理を追加
       const updateLocalMonthlyNote = (text) => {
         if (!currentUser) return;
         setShifts(prev => {
@@ -691,23 +762,38 @@
         fetchGAS('saveRecord', 'settings', 'key', { key: 'deadline', value: newDate });
       };
 
+      // 日別メモの複数日保存対応
       const handleSaveModal = () => {
         setIsLoading(true);
         const isDaily = modal.type === 'daily';
         const sheetName = isDaily ? 'dailyNotes' : 'personalNotes';
         const keyColumn = isDaily ? 'dateKey' : 'userId';
-        const saveKey = isDaily ? `${currentMonthStr}-${String(modal.targetId).padStart(2, '0')}` : modal.targetId;
-        const record = { [keyColumn]: saveKey, note: modal.text };
 
-        fetchGAS('saveRecord', sheetName, keyColumn, record)
-          .then(() => {
-            if (isDaily) {
-              setDailyNotes(prev => ({ ...prev, [currentMonthStr]: { ...(prev[currentMonthStr] || {}), [modal.targetId]: modal.text } }));
-            } else {
-              setPersonalNotes(prev => ({ ...prev, [modal.targetId]: modal.text }));
-            }
-            setModal({ isOpen: false, type: '', targetId: null, text: '' }); showToast('保存しました'); setIsLoading(false);
-          }).catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
+        if (isDaily) {
+          const daysToSave = modal.selectedDays && modal.selectedDays.length > 0 ? modal.selectedDays : (modal.targetId ? [modal.targetId] : []);
+          if (daysToSave.length === 0) { showToast('対象の日付を選択してください', 'error'); setIsLoading(false); return; }
+          const savePromises = daysToSave.map(day => {
+            const saveKey = `${currentMonthStr}-${String(day).padStart(2, '0')}`;
+            return fetchGAS('saveRecord', sheetName, keyColumn, { [keyColumn]: saveKey, note: modal.text });
+          });
+          Promise.all(savePromises).then(() => {
+            setDailyNotes(prev => {
+              const updatedMonth = { ...(prev[currentMonthStr] || {}) };
+              daysToSave.forEach(day => { updatedMonth[day] = modal.text; });
+              return { ...prev, [currentMonthStr]: updatedMonth };
+            });
+            setModal({ isOpen: false, type: '', targetId: null, text: '', selectedDays: [] }); 
+            showToast('保存しました'); 
+            setIsLoading(false);
+          }).catch(() => { alert('保存に失敗しました。'); setIsLoading(false); });
+        } else {
+          fetchGAS('saveRecord', sheetName, keyColumn, { [keyColumn]: modal.targetId, note: modal.text }).then(() => {
+            setPersonalNotes(prev => ({ ...prev, [modal.targetId]: modal.text }));
+            setModal({ isOpen: false, type: '', targetId: null, text: '', selectedDays: [] }); 
+            showToast('保存しました'); 
+            setIsLoading(false);
+          }).catch(() => { alert('保存に失敗しました。'); setIsLoading(false); });
+        }
       };
 
       const markNotificationAsRead = (id) => {
@@ -715,6 +801,20 @@
         const updatedNote = { ...note, read: true };
         setAdminNotifications(prev => prev.map(n => n.id === id ? updatedNote : n));
         fetchGAS('saveRecord', 'notifications', 'id', updatedNote); 
+      };
+
+      // スタッフ情報の更新処理を追加
+      const handleUpdateStaff = (e) => {
+        e.preventDefault();
+        if (!(editStaffForm.name || '').trim()) { showToast('氏名を入力してください', 'error'); return; }
+        setIsLoading(true);
+        const updatedUser = { ...editStaffForm.user, name: editStaffForm.name, email: editStaffForm.email, employmentCategory: editStaffForm.employmentCategory, role: editStaffForm.isAdmin ? 'admin' : 'staff' };
+        fetchGAS('saveRecord', 'users', 'id', updatedUser).then(() => {
+          setDbUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+          showToast(`${getDisplayName(updatedUser.name)} さんの情報を更新しました`);
+          setEditStaffForm({ isOpen: false, user: null, name: '', email: '', employmentCategory: '', isAdmin: false }); 
+          setIsLoading(false);
+        }).catch(() => { alert('システムエラーが発生しました。'); setIsLoading(false); });
       };
 
       const handleAddStaff = (e) => {
@@ -742,7 +842,7 @@
       const toggleStaffStatus = (userId, name, currentStatus) => {
         if (userId === currentUser?.id) { showToast('自分自身は変更できません', 'error'); return; }
         const newStatus = currentStatus === 'active' ? 'retired' : 'active';
-        setConfirmModal({ isOpen: true, title: '確認', message: `退職に変更します。`, isAlert: false, onConfirm: () => {
+        setConfirmModal({ isOpen: true, title: '確認', message: `状態を変更します。`, isAlert: false, onConfirm: () => {
           setIsLoading(true);
           const updatedUser = { ...dbUsers.find(u => u.id === userId), status: newStatus };
           fetchGAS('saveRecord', 'users', 'id', updatedUser).then(() => { setDbUsers(prev => prev.map(u => u.id === userId ? updatedUser : u)); showToast('更新しました'); setIsLoading(false); })
@@ -759,7 +859,6 @@
         }});
       };
 
-      //  月間コメントもエクスポートされるように追加
       const handleExportCSV = () => {
         let csv = "社員番号,名前,雇用区分,日付,ステータス,出勤,退勤,日別備考,月間コメント\n";
         staffUsers.filter(u => u.status === 'active').forEach(u => {
@@ -773,7 +872,7 @@
           });
         });
         const link = document.createElement("a");
-        const bom = new Uint8Array([0xEF, 0xBB, 0xBF]); // Excelでの文字化け防止
+        const bom = new Uint8Array([0xEF, 0xBB, 0xBF]); 
         const blob = new Blob([bom, csv], { type: 'text/csv' });
         link.href = URL.createObjectURL(blob);
         link.download = `シフト_${currentYear}年${currentMonth}月.csv`; link.click(); showToast('ダウンロードしました');
@@ -869,7 +968,7 @@
       const applyFixedShiftsToMonth = () => {
         setConfirmModal({ isOpen: true, title: '一括自動入力の確認', message: `固定シフトを未入力の日に反映します。よろしいですか？`, isAlert: false, onConfirm: () => {
           setIsLoading(true);
-          const newShifts = JSON.parse(JSON.stringify(shifts)); // ディープコピーで安全に複製
+          const newShifts = JSON.parse(JSON.stringify(shifts)); 
           if (!newShifts[activeTargetMonth]) newShifts[activeTargetMonth] = {};
           const updatePromises = [];
           
@@ -1047,11 +1146,13 @@
         (u.employmentCategory || '').includes(staffSearchQuery)
       );
 
-      const filteredShiftUsers = staffUsers.filter(u => 
-        (u.name || '').includes(shiftSearchQuery) || 
-        String(u.employeeId || '').includes(shiftSearchQuery) ||
-        (u.employmentCategory || '').includes(shiftSearchQuery)
-      );
+      const filteredShiftUsers = staffUsers.filter(u => {
+        if (displayFilter === 'admin' && u.role !== 'admin') return false;
+        if (displayFilter === 'staff' && u.role === 'admin') return false;
+        return (u.name || '').includes(shiftSearchQuery) || 
+               String(u.employeeId || '').includes(shiftSearchQuery) ||
+               (u.employmentCategory || '').includes(shiftSearchQuery);
+      });
 
       return (
         <div className="min-h-screen bg-gray-50 pb-40 relative">
@@ -1177,7 +1278,7 @@
                                   <span className={`text-xl sm:text-2xl font-black w-7 sm:w-8 text-right sm:text-center ${getDayColor(day)}`}>{day}</span>
                                   <span className={`text-sm sm:text-base font-bold ${getDayColor(day)}`}>{getDayOfWeek(day)}</span>
                                 </div>
-                                {currentDailyNotes[day] && <span className="text-xs bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-md leading-tight whitespace-normal break-words max-w-full text-center">{currentDailyNotes[day]}</span>}
+                                {currentDailyNotes[day] && <span className={`text-xs font-bold px-2 py-0.5 rounded-md leading-tight whitespace-normal break-words max-w-full text-center ${currentDailyNotes[day].includes('休刊日') ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>{currentDailyNotes[day]}</span>}
                               </div>
                               <div className="flex gap-1.5 sm:gap-2 w-full sm:w-auto">
                                 <button onClick={() => updateLocalShift(day, 'status', '未')} disabled={isDisabled} className={`w-full sm:w-[4.5rem] py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-bold transition-colors border ${shiftData.status === '未' ? 'bg-gray-600 text-white border-gray-600 shadow-sm' : `bg-white text-gray-500 border-gray-300 ${isDisabled ? '' : 'hover:bg-gray-50'}`}`}>未</button>
@@ -1241,7 +1342,7 @@
                             <div className="text-center border-b border-gray-100 pb-2">
                               <div className={`text-xl sm:text-2xl font-black ${getDayColor(day)}`}>{day}</div>
                               <div className={`text-xs sm:text-sm font-bold ${getDayColor(day)}`}>{getDayOfWeek(day)}</div>
-                              {currentDailyNotes[day] && <div className="text-[10px] sm:text-xs bg-red-100 text-red-700 font-bold rounded-md px-1.5 py-0.5 mt-1.5 truncate">{currentDailyNotes[day]}</div>}
+                              {currentDailyNotes[day] && <div className={`text-[10px] sm:text-xs font-bold rounded-md px-1.5 py-0.5 mt-1.5 truncate ${currentDailyNotes[day].includes('休刊日') ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>{currentDailyNotes[day]}</div>}
                             </div>
                             <div className="grid grid-cols-2 gap-1 mt-1">
                               <button onClick={() => updateLocalShift(day, 'status', '未')} disabled={rowDisabled} className={`py-1.5 rounded-md text-xs sm:text-sm font-bold border ${s.status === '未' ? 'bg-gray-600 text-white border-gray-600' : 'bg-white border-gray-300 text-gray-500'}`}>未</button>
@@ -1272,16 +1373,18 @@
                 )}
 
                 {staffViewMode === 'month' && (
-                  <div className="bg-white rounded-md shadow-sm mb-6 border border-gray-200 overflow-x-auto animate-fade-in no-scrollbar pt-16 pb-20">
-                    <div className="min-w-[700px]">
+                  <div className="bg-white rounded-md shadow-sm mb-6 border border-gray-200 animate-fade-in no-scrollbar pt-2 pb-20">
+                    <div className="w-full">
                       <div className="grid grid-cols-7 bg-gray-100 border-b border-gray-200">
-                        {['日', '月', '火', '水', '木', '金', '土'].map((dow, i) => (<div key={dow} className={`text-center py-3 font-bold border-r ${i===0?'text-red-500':i===6?'text-blue-500':'text-gray-700'}`}>{dow}</div>))}
+                        {['日', '月', '火', '水', '木', '金', '土'].map((dow, i) => (
+                          <div key={dow} className={`text-center py-2 text-[10px] sm:text-base font-bold border-r last:border-r-0 ${i===0?'text-red-500':i===6?'text-blue-500':'text-gray-700'}`}>{dow}</div>
+                        ))}
                       </div>
                       <div className="flex flex-col">
                         {weeks.map((week, wIdx) => (
                           <div key={wIdx} className="grid grid-cols-7 border-b border-gray-200">
                             {week.map((day, dIdx) => {
-                              if (!day) return <div key={`empty-${wIdx}-${dIdx}`} className="bg-gray-50 border-r border-gray-200 min-h-[140px] opacity-50"></div>;
+                              if (!day) return <div key={`empty-${wIdx}-${dIdx}`} className="bg-gray-50 border-r border-gray-200 min-h-[80px] opacity-50 last:border-r-0"></div>;
                               const s = myShifts[day] || { status: '未' };
                               const isPendingDay = myPendingDays[day]; 
                               const rowDisabled = isBaseDisabled || isPendingDay;
@@ -1291,26 +1394,39 @@
                               if (s.status === '有休') statusColorClass = 'bg-teal-50 text-teal-700 border-teal-200 font-bold';
 
                               return (
-                                <div key={day} className={`p-2 sm:p-3 border-r min-h-[140px] flex flex-col relative transition-colors ${isPendingDay ? 'bg-orange-50' : 'hover:bg-blue-50/10'}`}>
-                                  {isPendingDay && <div className="absolute top-1 right-1 bg-orange-500 text-white rounded-md text-[10px] sm:text-xs font-bold px-2 py-0.5">申請中</div>}
-                                  <div className="flex justify-center items-center mb-2"><span className={`text-base font-black ${getDayColor(day)}`}>{day}</span></div>
-                                  {currentDailyNotes[day] && <div className="bg-red-50 text-red-600 border border-red-200 rounded-md text-[11px] sm:text-xs font-bold px-2 py-1.5 w-full text-center mb-2">{currentDailyNotes[day]}</div>}
-                                  <div className="mt-auto flex flex-col gap-1.5">
-                                    <select value={s.status} onChange={(e) => updateLocalShift(day, 'status', e.target.value)} disabled={rowDisabled} className={`w-full rounded-md text-sm p-1.5 px-0 border text-center ${statusColorClass}`} style={{ textAlignLast: 'center' }}>
-                                      <option value="未">未入力</option><option value="休">休 み</option><option value="有休">有 休</option><option value="勤務">勤 務</option>
+                                <div key={day} className={`p-0.5 sm:p-2 border-r last:border-r-0 min-h-[100px] flex flex-col relative transition-colors ${isPendingDay ? 'bg-orange-50' : 'hover:bg-blue-50/10'}`}>
+                                  {isPendingDay && <div className="absolute top-0 right-0 bg-orange-500 text-white rounded-bl-md text-[8px] font-bold px-1 py-0.5 z-20">申請中</div>}
+                                  <div className="flex justify-center items-center mb-1"><span className={`text-sm sm:text-base font-black ${getDayColor(day)}`}>{day}</span></div>
+                                  
+                                  {currentDailyNotes[day] && (
+                                    <div className={`border rounded-sm text-[8px] sm:text-[11px] font-bold px-0.5 py-0.5 w-full text-center mb-1 leading-tight break-all ${currentDailyNotes[day].includes('休刊日') ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
+                                      {currentDailyNotes[day]}
+                                    </div>
+                                  )}
+
+                                  <div className="mt-auto flex flex-col gap-1">
+                                    <select 
+                                      value={s.status} 
+                                      onChange={(e) => updateLocalShift(day, 'status', e.target.value)} 
+                                      disabled={rowDisabled} 
+                                      className={`w-full rounded-md text-[10px] sm:text-sm p-1 px-0 border text-center appearance-none ${statusColorClass}`} 
+                                      style={{ textAlignLast: 'center' }}
+                                    >
+                                      <option value="未">未</option><option value="休">休</option><option value="有休">有休</option><option value="勤務">勤務</option>
                                     </select>
+                                    
                                     {(s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded)) && (
-                                      <div className="flex flex-col gap-1 mt-1 relative z-10">
-                                        <select value={s.start} onChange={(e) => updateLocalShift(day, 'start', e.target.value)} disabled={rowDisabled} className="w-full bg-white rounded-md border text-xs sm:text-sm py-1 px-0 text-center" style={{textAlignLast:'center'}}>{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t||'-'}</option>)}</select>
-                                        <select value={s.end} onChange={(e) => updateLocalShift(day, 'end', e.target.value)} disabled={rowDisabled} className="w-full bg-white rounded-md border text-xs sm:text-sm py-1 px-0 text-center" style={{textAlignLast:'center'}}>{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t||'-'}</option>)}</select>
+                                      <div className="flex flex-col gap-0.5 mt-0.5 relative z-10">
+                                        <select value={s.start} onChange={(e) => updateLocalShift(day, 'start', e.target.value)} disabled={rowDisabled} className="w-full bg-white rounded border text-[9px] sm:text-xs py-0.5 px-0 text-center font-bold appearance-none" style={{textAlignLast:'center'}}>{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t||'-'}</option>)}</select>
+                                        <select value={s.end} onChange={(e) => updateLocalShift(day, 'end', e.target.value)} disabled={rowDisabled} className="w-full bg-white rounded border text-[9px] sm:text-xs py-0.5 px-0 text-center font-bold appearance-none" style={{textAlignLast:'center'}}>{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t||'-'}</option>)}</select>
                                       </div>
                                     )}
-                                    {s.status !== '未' && <input type="text" value={s.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={rowDisabled} placeholder="日別備考" className="bg-white rounded-md border text-xs p-1.5 text-center mt-1" />}
+                                    
                                     {s.status === '休' && !rowDisabled && (
-                                      <div className="flex items-center justify-center gap-1 mt-1">
-                                        <input type="checkbox" checked={s.canWorkIfNeeded} onChange={() => updateLocalShift(day, 'canWorkIfNeeded', !s.canWorkIfNeeded)} className="w-3.5 h-3.5 accent-orange-500" />
-                                        <span className="text-xs text-gray-600 font-bold">調整可</span>
-                                      </div>
+                                      <label className="flex items-center justify-center gap-0.5 mt-0.5">
+                                        <input type="checkbox" checked={s.canWorkIfNeeded} onChange={() => updateLocalShift(day, 'canWorkIfNeeded', !s.canWorkIfNeeded)} className="w-3 h-3 accent-orange-500" />
+                                        <span className="text-[8px] text-gray-500 font-bold leading-none">可</span>
+                                      </label>
                                     )}
                                   </div>
                                 </div>
@@ -1487,15 +1603,16 @@
                             <button onClick={openMailForm} className="bg-blue-600 rounded-md hover:bg-blue-700 text-white font-bold py-2 px-4 text-sm shadow-sm flex items-center gap-2"><Icon name="envelope" /> メール送信</button>
                           </div>
                         </div>
-                        <div className="flex items-center justify-between gap-4 overflow-x-auto no-scrollbar pb-1">
-                          <div className="flex items-center gap-3 shrink-0">
+                        <div className="flex flex-wrap items-center justify-between gap-4 pb-1">
+                          <div className="flex flex-wrap items-center gap-3">
                             {!isActiveMonth && <button onClick={setAsActiveMonth} className="flex items-center gap-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 px-4 py-2.5 text-sm font-bold"><Icon name="play-circle" size={18}/> 募集にする</button>}
                             <div className="flex items-center gap-3 bg-gray-50 rounded-md px-4 py-2.5 border">
                               <span className="text-sm font-bold text-gray-700">締切日:</span>
                               <input type="date" value={deadline} onChange={handleUpdateDeadline} className="bg-white rounded-md border text-sm px-3 py-1.5 focus:ring-2 focus:ring-indigo-300 outline-none" />
                             </div>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button onClick={() => setModal({isOpen: true, type: 'daily', targetId: null, text: '', selectedDays: []})} className="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-4 py-2.5 text-sm font-bold flex gap-2 shadow-sm"><Icon name="pen" size={16}/> 日別メモの一括設定</button>
                             <button onClick={applyFixedShiftsToMonth} className="bg-emerald-100 text-emerald-800 border hover:bg-emerald-200 px-4 py-2.5 text-sm font-bold flex gap-2 shadow-sm"><Icon name="magic" size={16}/> 固定シフト反映</button>
                             <button onClick={toggleConfirmAll} disabled={!isActiveMonth} className={`px-5 py-2.5 rounded-md font-bold text-sm flex items-center gap-2 shadow-sm ${isConfirmed ? 'bg-green-100 text-green-800 border hover:bg-red-50 hover:text-red-700' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>
                               <Icon name={isConfirmed ? "unlock" : "check-circle"} size={18}/> {isConfirmed ? '確定解除' : '全体確定する'}
@@ -1505,138 +1622,206 @@
                       </div>
                     </div>
 
-                    <div className="bg-white rounded-md shadow-sm p-2.5 sm:p-4 border flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mt-6">
-                      <h2 className="text-base sm:text-lg font-bold text-gray-800 flex items-center gap-2">
-                        <Icon name="calendar" size={20} className="text-indigo-600 hidden sm:block" /> {shiftViewMode === 'month' ? '月間シフト表' : '日別ガントチャート'}
-                      </h2>
-                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-                        <button onClick={handleExportCSV} className="bg-emerald-600 rounded-md hover:bg-emerald-700 text-white font-bold py-2 px-4 text-sm shadow-sm flex items-center justify-center gap-2"><Icon name="file-excel" /> Excel出力 (CSV)</button>
-                        <div className="flex flex-nowrap bg-gray-100 rounded-md p-1.5 border w-full sm:w-auto overflow-x-auto no-scrollbar shrink-0">
-                          <button onClick={() => setShiftViewMode('month')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'month' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="th" /> 月間</button>
-                          <button onClick={() => setShiftViewMode('day')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'day' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="align-left" /> 日別</button>
+                    <div className="bg-white rounded-md shadow-sm p-3 sm:p-4 border flex flex-col gap-3 mt-6">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <h2 className="text-base sm:text-lg font-bold text-gray-800 flex items-center gap-2">
+                            <Icon name="calendar" size={20} className="text-indigo-600 hidden sm:block" /> {shiftViewMode === 'month' ? '月間シフト表' : '日別ガントチャート'}
+                          </h2>
+                          <select value={displayFilter} onChange={e => setDisplayFilter(e.target.value)} className="border border-gray-300 rounded-md px-3 py-1.5 text-sm font-bold text-gray-700 outline-none focus:ring-2 focus:ring-indigo-300 bg-gray-50 cursor-pointer">
+                            <option value="all">全員を表示</option>
+                            <option value="admin">管理者のみ</option>
+                            <option value="staff">オペレーターのみ</option>
+                          </select>
+                        </div>
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+                          <button onClick={handleExportCSV} className="bg-emerald-600 rounded-md hover:bg-emerald-700 text-white font-bold py-2 px-4 text-sm shadow-sm flex items-center justify-center gap-2"><Icon name="file-excel" /> Excel出力 (CSV)</button>
+                          <div className="flex flex-nowrap bg-gray-100 rounded-md p-1.5 border w-full sm:w-auto overflow-x-auto no-scrollbar shrink-0">
+                            <button onClick={() => setShiftViewMode('month')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'month' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="th" /> 月間</button>
+                            <button onClick={() => setShiftViewMode('day')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'day' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="align-left" /> 日別</button>
+                          </div>
                         </div>
                       </div>
+                      
+                      {/* 提出状況サマリー（自動計算） */}
+                      {(() => {
+                        const totalCount = filteredShiftUsers.length;
+                        const submittedCount = filteredShiftUsers.filter(u => (currentMonthStatus[u.id] || '未提出') === '提出済').length;
+                        const draftCount = filteredShiftUsers.filter(u => (currentMonthStatus[u.id] || '未提出') === '途中保存').length;
+                        const unsubmittedCount = totalCount - submittedCount - draftCount;
+                        return (
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 pt-3 border-t border-gray-100">
+                            <span className="text-sm font-bold text-gray-700 flex items-center gap-1 shrink-0"><Icon name="chart-pie" className="text-indigo-500" /> 提出状況:</span>
+                            <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm font-bold">
+                              <span className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-md border shadow-sm">全体: <span className="text-base">{totalCount}</span>名</span>
+                              <span className="bg-green-50 text-green-700 border border-green-200 px-3 py-1.5 rounded-md shadow-sm">提出済: <span className="text-base">{submittedCount}</span>名</span>
+                              <span className="bg-yellow-50 text-yellow-700 border border-yellow-200 px-3 py-1.5 rounded-md shadow-sm">途中保存: <span className="text-base">{draftCount}</span>名</span>
+                              <span className="bg-white text-gray-500 border border-gray-200 px-3 py-1.5 rounded-md shadow-sm">未提出: <span className="text-base">{unsubmittedCount}</span>名</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {shiftViewMode === 'month' && (
-                      <div className="bg-white rounded-md shadow-sm border overflow-x-auto no-scrollbar pt-4 pb-24 mt-2">
-                        <table className="w-full text-left whitespace-nowrap bg-white border-collapse min-w-[1200px]">
-                          <thead className="text-sm text-gray-700 bg-gray-100 border-b-2 relative z-20">
-                            <tr>
-                              <th rowSpan={2} className="px-4 py-3 sticky left-0 bg-gray-100 z-30 border-r-2 text-center min-w-[160px] text-base">スタッフ</th>
-                              {daysArray.map(day => (
-                                <th key={day} colSpan={2} className={`px-2 py-2 text-center min-w-[100px] border-r-2 border-b group relative ${getDayColor(day)} clickable-cell`}>
-                                  <div className="flex flex-col items-center rounded-md gap-1 cursor-pointer hover:bg-gray-200 p-1" onClick={() => setModal({isOpen: true, type: 'daily', targetId: day, text: currentDailyNotes[day]||''})}>
-                                    <span className="text-lg leading-none">{day}</span>
-                                    <span className="text-xs font-normal leading-none">({getDayOfWeek(day)})</span>
-                                    <span className={`mt-1 rounded-md bg-white border text-[10px] font-bold px-2 py-0.5 shadow-sm opacity-60 group-hover:opacity-100 w-full flex justify-center gap-1 ${currentDailyNotes[day] ? 'text-indigo-600 border-indigo-300 bg-indigo-50' : 'text-gray-500'}`}><Icon name={currentDailyNotes[day] ? "pen" : "plus"}/>{currentDailyNotes[day] ? "メモ編集" : "メモ"}</span>
-                                  </div>
-                                </th>
-                              ))}
-                            </tr>
-                            <tr>
-                              {daysArray.map(day => (
-                                <React.Fragment key={`sub-${day}`}>
-                                  <th className="px-1.5 py-1.5 text-xs text-center bg-gray-50 border-r font-bold text-gray-500 w-1/2">出</th>
-                                  <th className="px-1.5 py-1.5 text-xs text-center bg-gray-50 border-r-2 font-bold text-gray-500 w-1/2">退</th>
-                                </React.Fragment>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y relative z-10">
-                            <tr>
-                              <td className="px-3 py-2 font-bold sticky left-0 bg-gray-50 border-r-2 z-10 text-xs text-gray-500 text-center">日別メモ</td>
-                              {daysArray.map(day => (
-                                <td key={`note-${day}`} colSpan={2} className="px-1 py-1 border-r-2 bg-gray-50 align-top max-w-[100px] clickable-cell">
-                                  <div className="w-full h-full rounded-md cursor-pointer hover:bg-gray-100 p-1" onClick={() => setModal({isOpen: true, type: 'daily', targetId: day, text: currentDailyNotes[day]||''})}>
-                                    {currentDailyNotes[day] ? (<div className="bg-red-50 rounded-md text-red-600 border border-red-200 text-[11px] font-bold px-2 py-1.5 text-center whitespace-normal break-words">{currentDailyNotes[day]}</div>) : (<div className="text-[10px] text-gray-300 text-center mt-1">-</div>)}
-                                  </div>
-                                </td>
-                              ))}
-                            </tr>
+                      <div className="bg-white rounded-md shadow-sm border mt-2 relative flex flex-col">
+                        <div 
+                          className="overflow-x-scroll overflow-y-hidden" 
+                          style={{ minHeight: '14px' }}
+                          onScroll={(e) => {
+                            const tableContainer = document.getElementById('month-table-container');
+                            if (tableContainer && tableContainer.scrollLeft !== e.target.scrollLeft) {
+                              tableContainer.scrollLeft = e.target.scrollLeft;
+                            }
+                          }}
+                        >
+                          <div style={{ width: '1200px', height: '1px' }}></div>
+                        </div>
 
-                            {filteredShiftUsers.length === 0 ? (
-                              <tr><td colSpan={daysArray.length * 2 + 1} className="px-4 py-10 text-center text-gray-500 text-base">該当するスタッフがいません</td></tr>
-                            ) : (
-                              filteredShiftUsers.map(user => {
-                                const hasPending = pendingChanges[user.id] && Object.keys(pendingChanges[user.id]).length > 0;
-                                let statusText = currentMonthStatus[user.id] || '未提出'; let statusColor = 'bg-gray-100 text-gray-600';
-                                if (statusText === '提出済') statusColor = 'bg-green-100 text-green-700'; else if (statusText === '途中保存') statusColor = 'bg-yellow-100 text-yellow-700';
-                                if (isConfirmed && hasPending) { statusColor = 'bg-orange-100 text-orange-700 border border-orange-200'; statusText = '承認待ち'; }
+                        <div 
+                          id="month-table-container"
+                          className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-200px)] min-h-[600px] no-scrollbar flex-1"
+                          onScroll={(e) => {
+                            const topScrollbar = e.target.previousElementSibling;
+                            if (topScrollbar && topScrollbar.scrollLeft !== e.target.scrollLeft) {
+                              topScrollbar.scrollLeft = e.target.scrollLeft;
+                            }
+                          }}
+                        >
+                          <table className="w-full text-left whitespace-nowrap bg-white border-collapse min-w-[1200px]">
+                            <thead className="text-sm text-gray-700 bg-gray-100 border-b-2 sticky top-0 z-[50] shadow-sm">
+                              <tr>
+                                <th rowSpan={2} className="px-4 py-3 sticky left-0 top-0 bg-gray-100 z-[60] border-r-2 text-center min-w-[160px] text-base">スタッフ</th>
+                                {daysArray.map(day => (
+                                  <th key={day} colSpan={2} className={`px-2 py-2 text-center min-w-[100px] border-r-2 border-b bg-gray-100 ${getDayColor(day)}`}>
+                                    <div className="flex flex-col items-center gap-1 p-1">
+                                      <span className="text-lg leading-none">{day}</span>
+                                      <span className="text-xs font-normal leading-none">({getDayOfWeek(day)})</span>
+                                    </div>
+                                  </th>
+                                ))}
+                              </tr>
+                              <tr>
+                                {daysArray.map(day => (
+                                  <React.Fragment key={`sub-${day}`}>
+                                    <th className="px-1.5 py-1.5 text-xs text-center bg-gray-50 border-r font-bold text-gray-500 w-1/2">出</th>
+                                    <th className="px-1.5 py-1.5 text-xs text-center bg-gray-50 border-r-2 font-bold text-gray-500 w-1/2">退</th>
+                                  </React.Fragment>
+                                ))}
+                              </tr>
+                              <tr className="bg-gray-50 border-b-2 shadow-sm">
+                                <th className="px-3 py-2 font-bold sticky left-0 top-[76px] bg-gray-50 border-r-2 z-[60] text-xs text-gray-500 text-center">日別メモ</th>
+                                {daysArray.map(day => (
+                                  <th key={`note-${day}`} colSpan={2} className="px-1 py-1 border-r-2 align-top max-w-[100px] font-normal bg-gray-50">
+                                    <div className="w-full h-full p-1">
+                                      {currentDailyNotes[day] ? (<div className={`rounded-md border text-[11px] font-bold px-2 py-1.5 text-center whitespace-pre-wrap break-words ${currentDailyNotes[day].includes('休刊日') ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-red-50 text-red-600 border-red-200'}`}>{currentDailyNotes[day]}</div>) : (<div className="text-[10px] text-gray-300 text-center mt-1">-</div>)}
+                                    </div>
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y relative z-10">
+                              {filteredShiftUsers.length === 0 ? (
+                                <tr><td colSpan={daysArray.length * 2 + 1} className="px-4 py-10 text-center text-gray-500 text-base">該当するスタッフがいません</td></tr>
+                              ) : (
+                                filteredShiftUsers.map(user => {
+                                  const hasPending = pendingChanges[user.id] && Object.keys(pendingChanges[user.id]).length > 0;
+                                  let statusText = currentMonthStatus[user.id] || '未提出'; let statusColor = 'bg-gray-100 text-gray-600';
+                                  if (statusText === '提出済') statusColor = 'bg-green-100 text-green-700'; else if (statusText === '途中保存') statusColor = 'bg-yellow-100 text-yellow-700';
+                                  if (isConfirmed && hasPending) { statusColor = 'bg-orange-100 text-orange-700 border border-orange-200'; statusText = '承認待ち'; }
 
-                                return (
-                                  <tr key={user.id} className="hover:bg-blue-50/30 h-[56px] relative hover:z-30">
-                                    <td className="px-3 py-3 font-medium sticky left-0 bg-white border-r-2 z-20">
-                                      <div className="flex justify-between items-center mb-1.5 gap-2">
-                                        <div className="flex flex-col flex-1 min-w-0">
-                                          {/* 💡 変更：スタッフ名の横に月間コメントのアイコンを表示 */}
-                                          <div className="flex items-center gap-1.5">
-                                            <span className="font-bold text-sm truncate" title={getDisplayName(user.name)}>{getDisplayName(user.name)}</span>
-                                            {currentMonthShifts[user.id]?.monthlyNote && (
-                                              <div className="tooltip-container cursor-help flex items-center" tabIndex="0">
-                                                <Icon name="comment-alt" className="text-orange-500 text-sm animate-pulse" />
-                                                <span className="tooltip-text text-left font-normal max-w-xs whitespace-pre-wrap">{currentMonthShifts[user.id].monthlyNote}</span>
-                                              </div>
-                                            )}
-                                          </div>
-                                          <span className="text-xs text-gray-500 truncate mt-0.5">{user.employmentCategory || '未設定'}</span>
-                                        </div>
-                                        <button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`p-1.5 rounded-md shrink-0 shadow-sm relative z-30 ${personalNotes[user.id] ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' : 'bg-gray-100 text-gray-400 border border-gray-200'}`}><Icon name="comment-dots" size={14} /></button>
-                                      </div>
-                                      <span className={`text-[10px] rounded-md font-bold px-2 py-0.5 ${statusColor}`}>{statusText}</span>
-                                    </td>
-                                    {daysArray.map(day => {
-                                      const s = currentMonthShifts[user.id]?.[day] || { status: '未' };
-                                      const isPendingCell = pendingChanges[user.id]?.[day]; const cellBg = isPendingCell ? 'bg-orange-50 relative' : '';
-                                      if (s.status === '休' && !s.canWorkIfNeeded) return <td key={day} colSpan={2} className={`px-2 py-2 text-center border-r-2 align-middle ${isPendingCell ? 'bg-orange-100 relative' : 'bg-red-50/20'}`}>{isPendingCell && <div className="absolute inset-0 border-2 border-orange-400 pointer-events-none"></div>}<span className="text-red-500 font-bold text-lg relative z-10">休</span></td>;
-                                      if (s.status === '有休') return <td key={day} colSpan={2} className={`px-2 py-2 text-center border-r-2 align-middle ${isPendingCell ? 'bg-orange-100 relative' : 'bg-teal-50/20'}`}>{isPendingCell && <div className="absolute inset-0 border-2 border-orange-400 pointer-events-none"></div>}<span className="text-teal-600 rounded-md font-bold text-xs bg-teal-50 px-2.5 py-1 border relative z-10">有休</span></td>;
-                                      if (s.status === '未') return <td key={day} colSpan={2} className={`px-2 py-2 text-center border-r-2 align-middle ${cellBg}`}>{isPendingCell && <div className="absolute inset-0 border-2 border-orange-400 pointer-events-none"></div>}<span className="text-gray-300 relative z-10 text-lg">-</span></td>;
-                                      
-                                      return (
-                                        <React.Fragment key={day}>
-                                          <td className={`px-1.5 text-center border-r align-middle whitespace-nowrap relative hover:z-40 ${s.status === '休' ? (isPendingCell ? 'bg-orange-100' : 'bg-orange-50/50') : cellBg}`}>
-                                            {isPendingCell && <div className="absolute top-0 bottom-0 left-0 right-0 border-y-2 border-l-2 border-orange-400 pointer-events-none"></div>}
-                                            {s.status === '休' && <div className="text-[9px] text-orange-500 font-bold leading-none mb-1 relative z-10">休(調整可)</div>}
-                                            <div className="relative z-10 flex items-center justify-center gap-1">
-                                              <span className={`text-sm font-bold tracking-tighter ${s.status === '休' ? 'text-orange-700' : 'text-blue-700'}`}>{s.start}</span>
-                                              {s.note && (<div className="tooltip-container cursor-help" tabIndex="0"><Icon name="comment-dots" className="text-blue-500 text-sm" /><span className="tooltip-text">{s.note}</span></div>)}
+                                  return (
+                                    <tr 
+                                    key={`row-${user.id}`} 
+                                    draggable={true}
+                                    onDragStart={(e) => onDragStart(e, user.id)}
+                                    onDragOver={(e) => onDragOver(e, user.id)}
+                                    onDragLeave={(e) => onDragLeave(e, user.id)}
+                                    onDrop={(e) => onDrop(e, user.id)}
+                                    onDragEnd={onDragEnd}
+                                    className={`h-[46px] relative transition-colors ${dragOverStaffId === user.id ? 'bg-indigo-100 border-t-4 border-indigo-500 z-[80]' : 'hover:bg-blue-50/30 hover:z-[70]'} ${draggedStaffId === user.id ? 'opacity-30 bg-gray-100' : ''}`}
+                                  >
+                                    <td className="px-3 py-1.5 font-medium sticky left-0 bg-white border-r-2 z-[40] hover:z-[70]">
+                                      <div className="flex justify-between items-center mb-0.5 gap-2">
+                                          <div className="flex flex-col flex-1 min-w-0">
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="font-bold text-sm truncate" title={getDisplayName(user.name)}>{getDisplayName(user.name)}</span>
+                                              {currentMonthShifts[user.id]?.monthlyNote && (
+                                                <div className="tooltip-container tooltip-left cursor-help flex items-center" tabIndex="0">
+                                                  <Icon name="comment-alt" className="text-orange-500 text-sm animate-pulse" />
+                                                  <span className="tooltip-text text-left font-normal max-w-xs whitespace-pre-wrap">{currentMonthShifts[user.id].monthlyNote}</span>
+                                                </div>
+                                              )}
                                             </div>
-                                          </td>
-                                          <td className={`px-1.5 text-center border-r-2 align-middle whitespace-nowrap relative hover:z-40 ${s.status === '休' ? (isPendingCell ? 'bg-orange-100' : 'bg-orange-50/50') : cellBg}`}>
-                                            {isPendingCell && <div className="absolute top-0 bottom-0 left-0 right-0 border-y-2 border-r-2 border-orange-400 pointer-events-none"></div>}
-                                            <span className={`text-sm font-bold tracking-tighter relative z-10 ${s.status === '休' ? 'text-orange-700' : 'text-blue-700'}`}>{s.end}</span>
-                                          </td>
-                                        </React.Fragment>
-                                      );
-                                    })}
-                                  </tr>
-                                );
-                              })
-                            )}
+                                            <span className="text-[10px] text-gray-500 truncate mt-0.5">{user.employmentCategory || '未設定'}</span>
+                                          </div>
+                                          <div className="flex flex-col gap-1 shrink-0">
+                                            <div className="flex items-center justify-center bg-gray-50 border rounded text-gray-400 hover:bg-indigo-100 hover:text-indigo-600 transition-colors cursor-grab active:cursor-grabbing p-1" title="ドラッグして並び替え">
+                                              <Icon name="grip-vertical" size={14} />
+                                            </div>
+                                            <button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`p-1.5 rounded-md shrink-0 shadow-sm relative z-30 ${personalNotes[user.id] ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' : 'bg-gray-100 text-gray-400 border border-gray-200'}`}><Icon name="comment-dots" size={14} /></button>
+                                          </div>
+                                        </div>
+                                        <span className={`text-[10px] rounded-md font-bold px-2 py-0.5 inline-block whitespace-nowrap ${statusColor}`}>{statusText}</span>
+                                      </td>
+                                      {daysArray.map(day => {
+                                        const s = currentMonthShifts[user.id]?.[day] || { status: '未' };
+                                        const isPendingCell = pendingChanges[user.id]?.[day]; const cellBg = isPendingCell ? 'bg-orange-50 relative' : '';
+                                        if (s.status === '休' && !s.canWorkIfNeeded) return <td key={day} colSpan={2} className={`px-2 py-2 text-center border-r-2 align-middle ${isPendingCell ? 'bg-orange-100 relative' : 'bg-red-50/20'}`}>{isPendingCell && <div className="absolute inset-0 border-2 border-orange-400 pointer-events-none"></div>}<span className="text-red-500 font-bold text-lg relative z-10">休</span></td>;
+                                        if (s.status === '有休') return <td key={day} colSpan={2} className={`px-2 py-2 text-center border-r-2 align-middle ${isPendingCell ? 'bg-orange-100 relative' : 'bg-teal-50/20'}`}>{isPendingCell && <div className="absolute inset-0 border-2 border-orange-400 pointer-events-none"></div>}<span className="text-teal-500 font-bold text-lg relative z-10">有休</span></td>;
+                                        if (s.status === '未') return <td key={day} colSpan={2} className={`px-2 py-2 text-center border-r-2 align-middle ${cellBg}`}>{isPendingCell && <div className="absolute inset-0 border-2 border-orange-400 pointer-events-none"></div>}<span className="text-gray-300 relative z-10 text-lg">-</span></td>;
+                                        
+                                        return (
+                                          <React.Fragment key={day}>
+                                            <td className={`px-1.5 text-center border-r align-middle whitespace-nowrap relative hover:z-[70] ${s.status === '休' ? (isPendingCell ? 'bg-orange-100' : 'bg-orange-50/50') : cellBg}`}>
+                                              {isPendingCell && <div className="absolute top-0 bottom-0 left-0 right-0 border-y-2 border-l-2 border-orange-400 pointer-events-none"></div>}
+                                              {s.status === '休' && <div className="text-[9px] text-orange-500 font-bold leading-none mb-1 relative z-10">休(調整可)</div>}
+                                              <div className="relative z-10 flex items-center justify-center gap-1">
+                                                <span className={`text-sm font-bold tracking-tighter ${s.status === '休' ? 'text-orange-700' : 'text-blue-700'}`}>{s.start}</span>
+                                                {s.note && (<div className="tooltip-container cursor-help" tabIndex="0"><Icon name="comment-dots" className="text-blue-500 text-sm" /><span className="tooltip-text">{s.note}</span></div>)}
+                                              </div>
+                                            </td>
+                                            <td className={`px-1.5 text-center border-r-2 align-middle whitespace-nowrap relative hover:z-[70] ${s.status === '休' ? (isPendingCell ? 'bg-orange-100' : 'bg-orange-50/50') : cellBg}`}>
+                                              {isPendingCell && <div className="absolute top-0 bottom-0 left-0 right-0 border-y-2 border-r-2 border-orange-400 pointer-events-none"></div>}
+                                              <span className={`text-sm font-bold tracking-tighter relative z-10 ${s.status === '休' ? 'text-orange-700' : 'text-blue-700'}`}>{s.end}</span>
+                                            </td>
+                                          </React.Fragment>
+                                        );
+                                      })}
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
                             {filteredShiftUsers.length > 0 && (
-                              <>
-                                <tr className="bg-indigo-50/80 border-t-2 border-indigo-200">
-                                  <td className="px-3 py-3 font-bold sticky left-0 bg-indigo-50 border-r-2 z-10 text-sm text-indigo-900 text-center"><div className="flex justify-center gap-1"><Icon name="users" /> 出勤人数</div></td>
+                              <tfoot className="sticky bottom-0 z-[60] shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.15)]">
+                                <tr className="bg-indigo-50 border-t-2 border-indigo-300">
+                                  <td className="px-3 py-3 font-bold sticky left-0 bg-indigo-50 border-r-2 z-[60] text-sm text-indigo-900">
+                                    <div className="flex flex-col gap-1 items-start">
+                                      <div className="flex items-center gap-1"><Icon name="users" size={14}/>出勤人数</div>
+                                      <span className="text-[10px] text-indigo-500 font-bold mt-0.5">{displayFilter === 'all' ? '全員の集計' : displayFilter === 'admin' ? '管理者の集計' : 'スタッフの集計'}</span>
+                                    </div>
+                                  </td>
                                   {daysArray.map(day => {
                                     const { confirmed, possible } = getDailySummary(day); const hasAnyone = confirmed > 0 || possible > 0;
                                     return (
                                       <td key={`count-${day}`} colSpan={2} className="px-1 py-3 text-center border-r-2 align-middle whitespace-nowrap">
-                                        <span className={`font-black text-lg ${hasAnyone ? 'text-indigo-700' : 'text-gray-400 font-normal text-base'}`}>{hasAnyone ? (<>{confirmed}{possible > 0 && <span className="text-sm text-orange-600 ml-0.5">(+{possible})</span>}<span className="text-sm font-bold text-indigo-700 ml-0.5">名</span></>) : '-'}</span>
+                                        <span className={`font-black text-lg ${hasAnyone ? 'text-indigo-700' : 'text-gray-400 font-normal text-base'}`}>{hasAnyone ? (<>{confirmed}{possible > 0 && <span className="text-sm text-orange-600 ml-0.5">(+{possible})</span>}</>) : '-'}</span>
                                       </td>
                                     );
                                   })}
                                 </tr>
-                                <tr className="bg-indigo-100/50 border-t border-indigo-200">
-                                  <td className="px-3 py-3 font-bold sticky left-0 bg-indigo-50 border-r-2 z-10 text-sm text-indigo-900 text-center"><div className="flex justify-center gap-1"><Icon name="clock" /> 総稼働時間</div></td>
+                                <tr className="bg-indigo-100/90 backdrop-blur-sm border-t border-indigo-200">
+                                  <td className="px-3 py-3 font-bold sticky left-0 bg-indigo-100/90 backdrop-blur-sm border-r-2 z-[60] text-sm text-indigo-900"><div className="flex items-center gap-1"><Icon name="clock" size={14}/>稼働時間</div></td>
                                   {daysArray.map(day => {
                                     const { totalHours } = getDailySummary(day);
                                     return (<td key={`hours-${day}`} colSpan={2} className="px-2 py-2 text-center border-r-2 align-middle"><span className={`font-black text-base ${totalHours > 0 ? 'text-indigo-700' : 'text-gray-400 font-normal text-sm'}`}>{totalHours > 0 ? totalHours.toFixed(1) + 'h' : '-'}</span></td>);
                                   })}
                                 </tr>
-                              </>
+                              </tfoot>
                             )}
-                          </tbody>
-                        </table>
+                          </table>
+                        </div>
                       </div>
                     )}
 
@@ -1648,18 +1833,18 @@
                             <h3 className="text-lg sm:text-2xl font-black text-indigo-900 min-w-[140px] sm:min-w-[160px] text-center">{currentMonth}月{selectedDay}日 <span className="text-sm sm:text-base font-medium text-indigo-700">({getDayOfWeek(selectedDay)})</span></h3>
                             <button onClick={() => setSelectedDay(Math.min(daysInMonth, selectedDay + 1))} disabled={selectedDay === daysInMonth} className="p-2 sm:p-2.5 rounded-md bg-white border text-indigo-700 disabled:opacity-50"><Icon name="chevron-right" /></button>
                           </div>
-                          <button onClick={() => setModal({isOpen: true, type: 'daily', targetId: selectedDay, text: currentDailyNotes[selectedDay]||''})} className={`px-4 py-2 sm:py-1.5 text-sm sm:text-xs font-bold rounded-md shadow-sm border flex items-center justify-center gap-1.5 ${currentDailyNotes[selectedDay] ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white text-gray-600'}`}>
+                          <button onClick={() => setModal({isOpen: true, type: 'daily', targetId: selectedDay, text: currentDailyNotes[selectedDay]||'', selectedDays: [selectedDay]})} className={`px-4 py-2 sm:py-1.5 text-sm sm:text-xs font-bold rounded-md shadow-sm border flex items-center justify-center gap-1.5 ${currentDailyNotes[selectedDay] ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white text-gray-600'}`}>
                             <Icon name={currentDailyNotes[selectedDay] ? "pen" : "plus"} /> {currentDailyNotes[selectedDay] ? "メモを編集" : "メモを追加"}
                           </button>
                         </div>
                         
-                        {currentDailyNotes[selectedDay] && (<div className="bg-red-50 text-red-600 border-b text-sm font-bold px-4 py-2.5 text-center"><Icon name="comment-dots" className="mr-1.5" /> {currentDailyNotes[selectedDay]}</div>)}
+                        {currentDailyNotes[selectedDay] && (<div className={`border-b text-sm font-bold px-4 py-2.5 text-center whitespace-pre-wrap ${currentDailyNotes[selectedDay].includes('休刊日') ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-red-50 text-red-600 border-red-200'}`}><Icon name="comment-dots" className="mr-1.5" /> {currentDailyNotes[selectedDay]}</div>)}
 
-                        <div className="overflow-x-auto no-scrollbar pt-8 pb-24">
+                        <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-200px)] min-h-[600px] no-scrollbar border-t mt-2 relative">
                           <div className="min-w-[1100px]">
-                            <div className="flex border-b bg-gray-100 text-sm font-bold text-gray-500">
-                              <div className="w-64 shrink-0 px-5 py-3 border-r text-base">スタッフ / 実働時間</div>
-                              <div className="flex-1 flex relative h-10">{timeAxis.map(h => <div key={h} className="flex-1 border-r last:border-r-0 pl-1.5 pt-1.5 opacity-70">{h}:00</div>)}</div>
+                            <div className="flex border-b bg-gray-100 text-sm font-bold text-gray-500 sticky top-0 z-[50] shadow-sm">
+                              <div className="w-64 shrink-0 px-5 py-3 border-r text-base bg-gray-100 sticky left-0 z-[60]">スタッフ / 実働時間</div>
+                              <div className="flex-1 flex relative h-10 bg-gray-100">{timeAxis.map(h => <div key={h} className="flex-1 border-r last:border-r-0 pl-1.5 pt-1.5 opacity-70">{h}:00</div>)}</div>
                             </div>
                             <div className="divide-y divide-gray-100">
                               {filteredShiftUsers.length === 0 ? (
@@ -1671,11 +1856,19 @@
                                   const details = isWorking ? calculateShiftDetails(s.start, s.end) : null;
                                   
                                   return (
-                                    <div key={user.id} className="flex hover:bg-blue-50/30 items-center group min-h-[4rem] py-2 relative hover:z-30">
-                                      <div className="w-64 shrink-0 px-5 border-r flex flex-col justify-center bg-white z-10 group-hover:bg-blue-50/50 min-h-[3rem] relative hover:z-40">
+                                    <div 
+                                    key={user.id} 
+                                    draggable={true}
+                                    onDragStart={(e) => onDragStart(e, user.id)}
+                                    onDragOver={(e) => onDragOver(e, user.id)}
+                                    onDragLeave={(e) => onDragLeave(e, user.id)}
+                                    onDrop={(e) => onDrop(e, user.id)}
+                                    onDragEnd={onDragEnd}
+                                    className={`flex items-center group min-h-[3.25rem] py-1 relative transition-colors ${dragOverStaffId === user.id ? 'bg-indigo-100 border-t-4 border-indigo-500 z-[80]' : 'hover:bg-blue-50/30 hover:z-[70]'} ${draggedStaffId === user.id ? 'opacity-30 bg-gray-100' : ''}`}
+                                  >
+                                    <div className="w-64 shrink-0 px-5 border-r flex flex-col justify-center bg-white sticky left-0 z-[40] group-hover:bg-blue-50/50 min-h-[2.5rem] hover:z-[70]">
                                         <div className="flex items-center justify-between gap-2">
                                           <div className="flex flex-col flex-1 min-w-0">
-                                            {/* 💡 変更：スタッフ名の横に月間コメントのアイコンを表示 */}
                                             <div className="flex items-center gap-1.5">
                                               <span className="text-base font-bold text-gray-800 truncate" title={getDisplayName(user.name)}>{getDisplayName(user.name)}</span>
                                               {currentMonthShifts[user.id]?.monthlyNote && (
@@ -1687,9 +1880,16 @@
                                             </div>
                                             <span className="text-[10px] text-gray-500 truncate mt-0.5">{user.employmentCategory || '未設定'}</span>
                                           </div>
-                                          <div className="flex items-center gap-1 shrink-0">
-                                            {pendingChanges[user.id]?.[selectedDay] && <span className="bg-orange-500 rounded-md text-white text-[10px] font-bold px-2 py-0.5 animate-pulse">申請</span>}
-                                            <button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`p-1.5 rounded-md border shadow-sm relative z-30 ${personalNotes[user.id] ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-400'}`}><Icon name="comment-dots" size={14} /></button>
+                                          <div className="flex flex-col items-end gap-1 shrink-0">
+                                            <div className="flex items-center gap-1">
+                                              {pendingChanges[user.id]?.[selectedDay] && <span className="bg-orange-500 rounded-md text-white text-[10px] font-bold px-2 py-0.5 animate-pulse">申請</span>}
+                                              <button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`p-1.5 rounded-md border shadow-sm relative z-30 ${personalNotes[user.id] ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-400'}`}><Icon name="comment-dots" size={14} /></button>
+                                            </div>
+                                            <div className="flex gap-1 mt-0.5">
+                                              <div className="px-2 py-0.5 bg-gray-50 hover:bg-indigo-100 border rounded text-gray-400 hover:text-indigo-600 transition-colors cursor-grab active:cursor-grabbing" title="ドラッグして並び替え">
+                                                <Icon name="grip-lines" size={14} />
+                                              </div>
+                                            </div>
                                           </div>
                                         </div>
                                         <div className="flex items-center gap-2 mt-0.5">
@@ -1724,15 +1924,18 @@
                                 })
                               )}
                             </div>
-                            <div className="flex border-t-2 border-indigo-200 bg-indigo-50 items-stretch h-16">
-                              <div className="w-64 shrink-0 px-5 border-r border-indigo-200 flex flex-col justify-center"><span className="text-sm font-bold text-indigo-900">時間帯 出勤人数</span></div>
+                            <div className="flex border-t-2 border-indigo-300 bg-indigo-50 items-stretch py-1.5 sticky bottom-0 z-[50] shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.15)]">
+                              <div className="w-64 shrink-0 px-3 border-r border-indigo-200 flex flex-col justify-center bg-indigo-50 sticky left-0 z-[60]">
+                                <span className="text-xs font-bold text-indigo-900 mb-1 flex items-center gap-1"><Icon name="users" size={10}/>時間帯ごとの出勤人数</span>
+                                <span className="text-[10px] text-indigo-600 font-bold mt-0.5">{displayFilter === 'all' ? '全員の集計' : displayFilter === 'admin' ? '管理者の集計' : 'スタッフの集計'}</span>
+                              </div>
                               <div className="flex-1 flex relative">
                                 {timeAxis.map(h => {
                                    const { confirmed, possible } = getHourlyCount(selectedDay, h);
                                    return (
                                      <div key={h} className="flex-1 border-r border-indigo-200 flex flex-col items-center justify-center">
                                        <span className={`text-base font-black ${confirmed > 0 ? 'text-indigo-700 text-xl' : 'text-indigo-300'}`}>{confirmed > 0 ? confirmed : '-'}</span>
-                                       {possible > 0 && <span className="text-sm font-bold text-orange-600">(+{possible})</span>}
+                                       {possible > 0 && <span className="text-xs font-bold text-orange-600">(+{possible})</span>}
                                      </div>
                                    )
                                 })}
@@ -1829,9 +2032,10 @@
                         <div className="relative w-full max-w-sm"><span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400"><Icon name="search" /></span><input type="text" placeholder="名前、社員番号、雇用区分で検索..." value={staffSearchQuery} onChange={(e) => setStaffSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2 border rounded-md focus:ring-2 outline-none" /></div>
                       </div>
 
-                      <div className="overflow-x-auto no-scrollbar">
-                        <table className="w-full text-base text-left min-w-[500px]">
-                          <thead className="bg-gray-50 text-gray-600 border-y"><tr><th className="px-5 py-4 font-bold">社員番号</th><th className="px-5 py-4 font-bold">氏名 / 雇用区分</th><th className="px-5 py-4 font-bold text-center">提出状況</th><th className="px-5 py-4 font-bold text-center">管理</th></tr></thead>
+                      {/* PC用テーブル表示 */}
+                      <div className="hidden md:block overflow-x-auto no-scrollbar">
+                        <table className="w-full text-base text-left min-w-[600px]">
+                          <thead className="bg-gray-50 text-gray-600 border-y"><tr><th className="px-4 py-4 font-bold text-center w-20">表示順</th><th className="px-5 py-4 font-bold">社員番号</th><th className="px-5 py-4 font-bold">氏名 / 雇用区分</th><th className="px-5 py-4 font-bold text-center">提出状況</th><th className="px-5 py-4 font-bold text-center">管理</th></tr></thead>
                           <tbody className="divide-y">
                             {filteredDbUsers.filter(u => u.employeeId !== '9999').filter(u => showRetired || u.status === 'active').map(user => {
                               const isRetired = user.status === 'retired';
@@ -1840,7 +2044,21 @@
                               if (isConfirmed && pendingChanges[user.id] && Object.keys(pendingChanges[user.id]).length > 0) { stColor = 'bg-orange-100 text-orange-700 border'; stText = '承認待ち'; }
 
                               return (
-                                <tr key={user.id} className={`hover:bg-gray-50 ${isRetired ? 'opacity-50' : ''}`}>
+                                <tr 
+                                  key={`table-${user.id}`} 
+                                  draggable={true}
+                                  onDragStart={(e) => onDragStart(e, user.id)}
+                                  onDragOver={(e) => onDragOver(e, user.id)}
+                                  onDragLeave={(e) => onDragLeave(e, user.id)}
+                                  onDrop={(e) => onDrop(e, user.id)}
+                                  onDragEnd={onDragEnd}
+                                  className={`transition-colors ${dragOverStaffId === user.id ? 'bg-indigo-100 border-t-4 border-indigo-500' : 'hover:bg-gray-50'} ${draggedStaffId === user.id ? 'opacity-30' : isRetired ? 'opacity-50' : ''}`}
+                                >
+                                  <td className="px-2 py-4 text-center">
+                                    <div className="flex justify-center items-center gap-1 cursor-grab active:cursor-grabbing text-gray-400 hover:text-indigo-600 p-2" title="ドラッグして並び替え">
+                                      <Icon name="grip-lines" size={18} />
+                                    </div>
+                                  </td>
                                   <td className="px-5 py-4 font-mono text-gray-600 font-bold">{user.employeeId}</td>
                                   <td className="px-5 py-4">
                                     <div className="flex items-center flex-wrap gap-2 font-bold text-gray-800">
@@ -1850,9 +2068,10 @@
                                     </div>
                                     <div className="text-xs text-gray-500 mt-1">{user.employmentCategory || '未設定'}</div>
                                   </td>
-                                  <td className="px-5 py-4 text-center">{!isRetired ? <span className={`px-3 py-1.5 rounded-md text-xs font-bold ${stColor}`}>{stText}</span> : '-'}</td>
+                                  <td className="px-5 py-4 text-center align-middle">{!isRetired ? <span className={`inline-block whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-bold ${stColor}`}>{stText}</span> : '-'}</td>
                                   <td className="px-5 py-4">
                                     <div className="flex justify-center gap-2">
+                                      {!isRetired && (<div className="tooltip-container"><button type="button" onClick={(e) => { e.stopPropagation(); setEditStaffForm({ isOpen: true, user: user, name: getDisplayName(user.name), email: user.email || '', employmentCategory: user.employmentCategory || '', isAdmin: user.role === 'admin' }); }} className="w-10 h-10 flex justify-center items-center rounded-md border shadow-sm bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"><Icon name="pen" size={16} /></button><span className="tooltip-text">情報編集</span></div>)}
                                       {!isRetired && (<div className="tooltip-container"><button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`w-10 h-10 flex justify-center items-center rounded-md border ${personalNotes[user.id] ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-50 text-gray-500'}`}><Icon name="comment-dots" size={18} /></button><span className="tooltip-text">個人宛メッセージ</span></div>)}
                                       {!isRetired && (<div className="tooltip-container"><button onClick={() => openFixedShiftForm(user)} className="w-10 h-10 flex justify-center items-center bg-emerald-50 text-emerald-600 border rounded-md"><Icon name="calendar-day" size={18} /></button><span className="tooltip-text">曜日固定シフト</span></div>)}
                                       <div className="tooltip-container"><button type="button" onClick={(e) => { e.stopPropagation(); toggleStaffStatus(user.id, user.name, user.status); }} className={`w-10 h-10 flex justify-center items-center rounded-md border transition-colors ${isRetired ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-orange-50 text-orange-600 hover:bg-orange-100'}`}><Icon name={isRetired ? 'user-check' : 'door-open'} size={18} /></button><span className="tooltip-text">{isRetired ? '復職' : '退職'}</span></div>
@@ -1864,6 +2083,54 @@
                             })}
                           </tbody>
                         </table>
+                      </div>
+
+                      {/* スマホ用カード表示 */}
+                      <div className="md:hidden flex flex-col gap-3">
+                        {filteredDbUsers.filter(u => u.employeeId !== '9999').filter(u => showRetired || u.status === 'active').map(user => {
+                          const isRetired = user.status === 'retired';
+                          let stText = activeMonthStatus[user.id] || '未提出'; let stColor = 'bg-gray-100 text-gray-600';
+                          if (stText === '提出済') stColor = 'bg-green-100 text-green-700'; else if (stText === '途中保存') stColor = 'bg-yellow-100 text-yellow-700';
+                          if (isConfirmed && pendingChanges[user.id] && Object.keys(pendingChanges[user.id]).length > 0) { stColor = 'bg-orange-100 text-orange-700 border'; stText = '承認待ち'; }
+
+                          return (
+                            <div 
+                              key={`card-${user.id}`} 
+                              draggable={true}
+                              onDragStart={(e) => onDragStart(e, user.id)}
+                              onDragOver={(e) => onDragOver(e, user.id)}
+                              onDragLeave={(e) => onDragLeave(e, user.id)}
+                              onDrop={(e) => onDrop(e, user.id)}
+                              onDragEnd={onDragEnd}
+                              className={`border rounded-md p-4 shadow-sm flex flex-col gap-3 transition-colors ${dragOverStaffId === user.id ? 'bg-indigo-100 border-indigo-500 scale-[1.02] z-50 shadow-md' : 'bg-white'} ${draggedStaffId === user.id ? 'opacity-30' : isRetired ? 'opacity-60 bg-gray-50' : ''}`}
+                            >
+                              <div className="flex justify-between items-start gap-2">
+                                <div className="flex flex-col">
+                                  <div className="flex items-center flex-wrap gap-2 font-bold text-gray-800 text-base">
+                                    <span>{getDisplayName(user.name)}</span>
+                                    {user.role === 'admin' && <span className="text-[10px] bg-indigo-100 text-indigo-700 border px-2 py-0.5 rounded-full">管理者</span>}
+                                    {isRetired && <span className="text-[10px] bg-gray-200 text-gray-600 border px-2 py-0.5 rounded-full">退職済</span>}
+                                  </div>
+                                  <div className="text-xs text-gray-500 mt-1 font-mono">ID: {user.employeeId} / {user.employmentCategory || '未設定'}</div>
+                                </div>
+                                <div className="flex flex-col items-end gap-2">
+                                  <div className="flex items-center gap-1 bg-gray-50 border rounded-md px-3 py-1 cursor-grab active:cursor-grabbing text-gray-400" title="ドラッグして並び替え">
+                                    <Icon name="grip-lines" size={14} />
+                                  </div>
+                                  {!isRetired ? <span className={`inline-block whitespace-nowrap px-3 py-1.5 rounded-md text-[10px] font-bold ${stColor}`}>{stText}</span> : <span className="text-gray-400 text-sm font-bold">-</span>}
+                                </div>
+                              </div>
+                              
+                              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 mt-1">
+                                {!isRetired && (<button type="button" onClick={(e) => { e.stopPropagation(); setEditStaffForm({ isOpen: true, user: user, name: getDisplayName(user.name), email: user.email || '', employmentCategory: user.employmentCategory || '', isAdmin: user.role === 'admin' }); }} className="w-10 h-10 flex justify-center items-center rounded-md border shadow-sm bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"><Icon name="pen" size={16} /></button>)}
+                                {!isRetired && (<button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`w-10 h-10 flex justify-center items-center rounded-md border shadow-sm ${personalNotes[user.id] ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-gray-50 text-gray-500'}`}><Icon name="comment-dots" size={18} /></button>)}
+                                {!isRetired && (<button onClick={() => openFixedShiftForm(user)} className="w-10 h-10 flex justify-center items-center bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-md shadow-sm"><Icon name="calendar-day" size={18} /></button>)}
+                                <button type="button" onClick={(e) => { e.stopPropagation(); toggleStaffStatus(user.id, user.name, user.status); }} className={`w-10 h-10 flex justify-center items-center rounded-md border shadow-sm transition-colors ${isRetired ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-orange-50 text-orange-600 hover:bg-orange-100 border-orange-200'}`}><Icon name={isRetired ? 'user-check' : 'door-open'} size={18} /></button>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteStaff(user.id, user.name); }} className="w-10 h-10 flex justify-center items-center text-red-500 hover:bg-red-50 border shadow-sm hover:border-red-200 rounded-md transition-colors"><Icon name="trash" size={18} /></button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -1998,10 +2265,93 @@
 
           {modal.isOpen && (
             <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
-              <div className="bg-white rounded-lg w-full max-w-md flex flex-col">
-                <div className="bg-indigo-600 px-5 py-4 text-white font-bold flex gap-3"><Icon name={modal.type === 'daily' ? 'calendar-alt' : 'comment-alt'} size={20} />{modal.type === 'daily' ? `${currentMonth}月${modal.targetId}日のメモ設定` : '個人宛メッセージ'}</div>
-                <div className="p-5"><textarea value={modal.text} onChange={(e) => setModal({ ...modal, text: e.target.value })} className="w-full border p-4 rounded-md h-32 resize-none" /></div>
-                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t"><button onClick={() => setModal({ isOpen: false, type: '', targetId: null, text: '' })} className="px-5 py-2.5 font-bold text-gray-600">キャンセル</button><button onClick={handleSaveModal} className="px-5 py-2.5 rounded-md font-bold bg-indigo-600 text-white">保存する</button></div>
+              <div className="bg-white rounded-lg w-full max-w-md flex flex-col max-h-[90vh]">
+                <div className="bg-indigo-600 px-5 py-4 text-white font-bold flex gap-3 shrink-0"><Icon name={modal.type === 'daily' ? 'calendar-alt' : 'comment-alt'} size={20} />{modal.type === 'daily' ? `${currentMonth}月のメモ設定` : '個人宛メッセージ'}</div>
+                <div className="p-4 sm:p-5 overflow-y-auto flex-1">
+                  {modal.type === 'daily' && (
+                    <div className="mb-4">
+                      <p className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-1"><Icon name="check-square" className="text-indigo-500"/> 同じメモを他の日にも適用する</p>
+                      <div className="border rounded-md p-2 bg-gray-50 shadow-inner">
+                        <div className="grid grid-cols-7 gap-1 text-center mb-1">
+                          {['日','月','火','水','木','金','土'].map((dow, i) => (<div key={dow} className={`text-[10px] font-bold ${i===0?'text-red-500':i===6?'text-blue-500':'text-gray-500'}`}>{dow}</div>))}
+                        </div>
+                        {weeks.map((week, wIdx) => (
+                          <div key={wIdx} className="grid grid-cols-7 gap-1 mb-1 last:mb-0">
+                            {week.map((d, dIdx) => {
+                              if (!d) return <div key={`empty-${dIdx}`} className="p-1"></div>;
+                              const currentSelected = modal.selectedDays || [modal.targetId];
+                              const isSelected = currentSelected.includes(d);
+                              return (
+                                <button 
+                                  key={d} 
+                                  onClick={() => {
+                                    let newSelected;
+                                    if (currentSelected.includes(d)) {
+                                      if (currentSelected.length === 1) return;
+                                      newSelected = currentSelected.filter(day => day !== d);
+                                    } else {
+                                      newSelected = [...currentSelected, d].sort((a,b)=>a-b);
+                                    }
+                                    setModal({ ...modal, selectedDays: newSelected });
+                                  }}
+                                  className={`py-1.5 text-xs font-bold rounded-md transition-colors ${isSelected ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-gray-300 text-gray-700 hover:bg-indigo-50'}`}
+                                >
+                                  {d}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-1"><Icon name="pen" className="text-indigo-500"/> メモ内容</p>
+                  <textarea value={modal.text} onChange={(e) => setModal({ ...modal, text: e.target.value })} placeholder="入力してください" className="w-full border border-gray-300 p-4 rounded-md h-32 resize-none focus:ring-2 focus:ring-indigo-300 outline-none" />
+                </div>
+                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t shrink-0"><button onClick={() => setModal({ isOpen: false, type: '', targetId: null, text: '', selectedDays: [] })} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-100 rounded-md transition-colors">キャンセル</button><button onClick={handleSaveModal} className="px-6 py-2.5 rounded-md font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-colors">保存する</button></div>
+              </div>
+            </div>
+          )}
+
+          {/* 追加：スタッフ情報編集モーダル */}
+          {editStaffForm.isOpen && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
+              <div className="bg-white rounded-lg shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="bg-indigo-600 px-5 py-4 text-white font-bold text-lg flex justify-between items-center shrink-0">
+                  <div className="flex gap-3 items-center"><Icon name="user-edit" size={20} />スタッフ情報編集</div>
+                  <button onClick={() => setEditStaffForm({ ...editStaffForm, isOpen: false })}><Icon name="times" size={20}/></button>
+                </div>
+                <div className="p-5 overflow-y-auto flex-1">
+                  <form id="editStaffForm" onSubmit={handleUpdateStaff} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-1.5">社員番号 <span className="text-gray-400 font-normal text-xs">(変更不可)</span></label>
+                      <input type="text" value={editStaffForm.user?.employeeId || ''} disabled className="w-full rounded-md border p-3 bg-gray-100 text-gray-500 cursor-not-allowed font-mono" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-1.5">氏名 <span className="text-red-500 text-xs">※必須</span></label>
+                      <input type="text" required value={editStaffForm.name} onChange={e => setEditStaffForm({...editStaffForm, name: e.target.value})} className="w-full rounded-md border p-3 focus:ring-2 focus:ring-indigo-300 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-1.5">メールアドレス</label>
+                      <input type="email" value={editStaffForm.email} onChange={e => setEditStaffForm({...editStaffForm, email: e.target.value})} className="w-full rounded-md border p-3 focus:ring-2 focus:ring-indigo-300 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-1.5">雇用区分</label>
+                      <input type="text" placeholder="例：A契約、Type4..." value={editStaffForm.employmentCategory} onChange={(e) => setEditStaffForm({ ...editStaffForm, employmentCategory: e.target.value })} className="w-full rounded-md border p-3 focus:ring-2 focus:ring-indigo-300 outline-none" />
+                    </div>
+                    <div className="pt-2 border-t mt-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={editStaffForm.isAdmin} onChange={e => setEditStaffForm({...editStaffForm, isAdmin: e.target.checked})} className="w-5 h-5 accent-indigo-600" />
+                        <span className="text-sm font-bold text-gray-800">管理者権限を付与する</span>
+                      </label>
+                      <p className="text-[11px] text-gray-500 mt-1 ml-7">このユーザーも管理画面を見れるようになります。</p>
+                    </div>
+                  </form>
+                </div>
+                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t shrink-0">
+                  <button type="button" onClick={() => setEditStaffForm({ ...editStaffForm, isOpen: false })} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-100 rounded-md transition-colors">キャンセル</button>
+                  <button type="submit" form="editStaffForm" className="px-6 py-2.5 font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-colors shadow-sm">更新する</button>
+                </div>
               </div>
             </div>
           )}
