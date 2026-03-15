@@ -860,7 +860,7 @@
       };
 
       const handleExportCSV = () => {
-        let csv = "社員番号,名前,雇用区分,日付,ステータス,出勤,退勤,日別備考,月間コメント\n";
+        let csv = "社員番号,名前,雇用区分,日付,ステータス,出勤,退勤,備考,月間コメント\n";
         staffUsers.filter(u => u.status === 'active').forEach(u => {
           const mNote = (currentMonthShifts[u.id]?.monthlyNote || '').replace(/"/g, '""');
           const mNoteCsv = `"${mNote}"`;
@@ -1303,7 +1303,7 @@
                               <div className="flex justify-end sm:pl-20 mt-1 w-full sm:w-auto">
                                 <div className="relative w-full sm:w-auto">
                                   <Icon name="comment-dots" className="absolute left-2.5 top-[10px] text-gray-400 text-xs" />
-                                  <input type="text" value={shiftData.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={isDisabled} placeholder="日別備考 (任意)" className="w-full sm:w-72 bg-white border border-gray-300 text-xs sm:text-sm rounded-md pl-8 pr-3 py-1.5 focus:ring-2 focus:ring-blue-300 outline-none" />
+                                  <input type="text" value={shiftData.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={isDisabled} placeholder="備考 (任意)" className="w-full sm:w-72 bg-white border border-gray-300 text-xs sm:text-sm rounded-md pl-8 pr-3 py-1.5 focus:ring-2 focus:ring-blue-300 outline-none" />
                                 </div>
                               </div>
                             )}
@@ -1357,7 +1357,7 @@
                                 <select value={s.end} onChange={(e) => updateLocalShift(day, 'end', e.target.value)} disabled={rowDisabled} className="w-full bg-gray-50 border border-gray-300 rounded-md text-xs sm:text-sm py-1.5 px-0 text-center font-bold appearance-none" style={{textAlignLast:'center'}}>{HOUR_OPTIONS.map(t=><option key={t} value={t}>{t||'--:--'}</option>)}</select>
                               </div>
                             )}
-                            {s.status !== '未' && <input type="text" value={s.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={rowDisabled} placeholder="日別備考" className="mt-2 bg-white border border-gray-300 rounded-md text-xs p-1.5 text-center focus:ring-1 focus:ring-blue-300 outline-none" />}
+                            {s.status !== '未' && <input type="text" value={s.note || ''} onChange={(e) => updateLocalShift(day, 'note', e.target.value)} disabled={rowDisabled} placeholder="備考" className="mt-2 bg-white border border-gray-300 rounded-md text-xs p-1.5 text-center focus:ring-1 focus:ring-blue-300 outline-none" />}
                             {s.status === '休' && !rowDisabled && (
                               <label className="flex items-center cursor-pointer gap-1 justify-center mt-1.5 bg-gray-50 rounded-md p-1.5 border">
                                 <input type="checkbox" className="sr-only peer" checked={s.canWorkIfNeeded} onChange={() => updateLocalShift(day, 'canWorkIfNeeded', !s.canWorkIfNeeded)} />
@@ -1442,7 +1442,7 @@
                 {/* 追加：月間コメント入力エリア */}
                 <div className="bg-white rounded-md shadow-sm mb-24 border border-gray-200 p-4 animate-fade-in">
                   <label className="flex items-center gap-2 text-sm font-bold text-gray-700 mb-2">
-                    <Icon name="comment-dots" className="text-blue-500" /> 今月のシフトに関する連絡・希望 (任意)
+                    <Icon name="comment-dots" className="text-blue-500" /> 提出月のシフトに関する連絡・希望 (任意)
                   </label>
                   <textarea 
                     value={myShifts.monthlyNote || ''} 
