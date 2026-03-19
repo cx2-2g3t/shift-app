@@ -47,10 +47,16 @@
     .input-flat { border: none; border-bottom: 2px solid #cbd5e1; border-radius: 0; background: transparent; padding: 12px 8px; transition: border-color 0.2s ease; }
     .input-flat:focus { outline: none; border-bottom-color: #2563eb; box-shadow: none; }
     .clickable-cell { position: relative; z-index: 20; }
+
+/* スマホ等でスクロール中の不要なホバー判定（カクつきの原因）を無効化する */
+    @media (pointer: coarse) {
+      .hover\:bg-blue-50\/30:hover { background-color: transparent !important; }
+      .hover\:z-\[70\]:hover { z-index: inherit !important; }
+    }
   </style>
 </head>
 <body class="bg-gray-100 font-sans antialiased text-gray-800"><div id="root"></div><script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
     const DEFAULT_START_TIME = '';
     const DEFAULT_END_TIME = '';
@@ -145,9 +151,12 @@
       const [modal, setModal] = useState({ isOpen: false, type: '', targetId: null, text: '', selectedDays: [] });
       const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, isAlert: false });
       const [adminTab, setAdminTab] = useState('shift'); 
+      const [staffOrder, setStaffOrder] = useState([]);
       
       const [shiftViewMode, setShiftViewMode] = useState('month');
       const [selectedDay, setSelectedDay] = useState(1);
+      
+      const isScrollingRef = useRef(false);
       
       const [newStaff, setNewStaff] = useState({ employeeId: '', name: '', email: '', isAdmin: false, employmentCategory: '' });
       const [editStaffForm, setEditStaffForm] = useState({ isOpen: false, user: null, name: '', email: '', employmentCategory: '', isAdmin: false });
@@ -191,8 +200,14 @@
       const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
       const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
-      const staffUsers = useMemo(() => dbUsers.filter(u => u.employeeId !== '9999').sort((a,b) => (a.displayOrder || 999) - (b.displayOrder || 999)), [dbUsers]);
-      const adminUsersList = useMemo(() => dbUsers.filter(u => u.role === 'admin' && u.status === 'active' && u.employeeId !== '9999').sort((a,b) => (a.displayOrder || 999) - (b.displayOrder || 999)), [dbUsers]);
+      // エラーを防ぐため、データが壊れていても必ず配列として扱う安全な getOrder 関数
+      const getOrder = (id) => { 
+        const arr = Array.isArray(staffOrder) ? staffOrder : [];
+        const idx = arr.indexOf(id); 
+        return idx >= 0 ? idx : 999; 
+      };
+      const staffUsers = useMemo(() => dbUsers.filter(u => u.employeeId !== '9999').sort((a,b) => getOrder(a.id) - getOrder(b.id)), [dbUsers, staffOrder]);
+      const adminUsersList = useMemo(() => dbUsers.filter(u => u.role === 'admin' && u.status === 'active' && u.employeeId !== '9999').sort((a,b) => getOrder(a.id) - getOrder(b.id)), [dbUsers, staffOrder]);
       
       const pendingReqs = useMemo(() => changeRequests.filter(req => req.status === 'pending'), [changeRequests]);
       const isActiveMonth = currentMonthStr === activeTargetMonth;
@@ -241,6 +256,16 @@
             if (deadlineObj) setDeadline(deadlineObj.value);
             const isConfirmedObj = settings.find(s => s.key === 'isConfirmed');
             if (isConfirmedObj) setIsConfirmed(isConfirmedObj.value === 'true');
+
+            const staffOrderObj = settings.find(s => s.key === 'staffOrder');
+            if (staffOrderObj) {
+              try { 
+                const parsed = JSON.parse(staffOrderObj.value);
+                setStaffOrder(Array.isArray(parsed) ? parsed : []); 
+              } catch(e){
+                setStaffOrder([]);
+              }
+            }
 
             const shiftsState = {}; const statusState = {};
             (data.shifts || []).forEach(row => {
@@ -578,26 +603,77 @@
         });
       };
 
-      const handleSubmitShift = (isSubmit = false) => {
-        if (isSubmit && currentUser) {
-          const currentShiftsForSubmit = activeMonthShifts[currentUser.id] || {};
-          const hasUnentered = daysArray.some(day => !currentShiftsForSubmit[day] || currentShiftsForSubmit[day].status === '未');
-          if (hasUnentered) { setConfirmModal({ isOpen: true, title: '未入力エラー', message: '未入力の日付があります。すべて選択してから提出してください。', isAlert: true, onConfirm: null }); return; }
-          const hasMissingTime = daysArray.some(day => { const s = currentShiftsForSubmit[day]; return (s && s.status === '勤務') ? (!s.start || !s.end) : false; });
-          if (hasMissingTime) { setConfirmModal({ isOpen: true, title: '時間未入力エラー', message: '「勤務」の日は、出勤時間と退勤時間の両方を選択してください。', isAlert: true, onConfirm: null }); return; }
-        }
-        
+      // ▼▼ シフトの保存処理（内部関数） ▼▼
+      const executeSubmitShift = (isSubmit, unenteredDays = [], adjustableDays = []) => {
         setIsLoading(true);
         const statusToSave = isSubmit ? '提出済' : '途中保存';
-        const record = { recordId: `${currentUser.id}_${activeTargetMonth}`, userId: currentUser.id, month: activeTargetMonth, status: statusToSave, shiftData: activeMonthShifts[currentUser.id] || {} };
+        
+        // 既存のシフトデータをコピー
+        const currentShifts = activeMonthShifts[currentUser.id] || {};
+        let shiftsToSave = { ...currentShifts };
+        
+        // 未入力の日があれば一括で「休」を設定する
+        if (unenteredDays.length > 0) {
+          unenteredDays.forEach(day => {
+            // adjustableDays（選択された日）に含まれているかチェック
+            const canWork = adjustableDays.includes(day);
+            // 元のデータが「未」または存在しない場合のみ上書き
+            if (!currentShifts[day] || currentShifts[day].status === '未') {
+              shiftsToSave[day] = { status: '休', start: DEFAULT_START_TIME, end: DEFAULT_END_TIME, canWorkIfNeeded: canWork, note: '' };
+            }
+          });
+        }
+
+        const record = { recordId: `${currentUser.id}_${activeTargetMonth}`, userId: currentUser.id, month: activeTargetMonth, status: statusToSave, shiftData: shiftsToSave };
 
         fetchGAS('saveRecord', 'shifts', 'recordId', record)
           .then(() => {
+            if (isSubmit) {
+              fetchGAS('sendTeamsNotification', `✅ **シフト提出**\n${getDisplayName(currentUser.name)}さんから ${activeTargetMonth.split('-')[1]}月 分のシフトが提出されました。`);
+            }
+
+            if (unenteredDays.length > 0) {
+              setShifts(prev => ({
+                ...prev, [activeTargetMonth]: { ...(prev[activeTargetMonth] || {}), [currentUser.id]: shiftsToSave }
+              }));
+            }
             setSubmissionStatus(prev => ({ ...prev, [activeTargetMonth]: { ...(prev[activeTargetMonth] || {}), [currentUser.id]: statusToSave } }));
             setConfirmModal({ isOpen: true, title: '処理完了', message: isSubmit ? 'シフトの提出が完了しました。' : 'シフトを一時保存しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
           .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
+      };
+
+      const handleSubmitShift = (isSubmit = false) => {
+        if (!currentUser) return;
+        const currentShiftsForSubmit = activeMonthShifts[currentUser.id] || {};
+
+        if (isSubmit) {
+          const hasMissingTime = daysArray.some(day => { const s = currentShiftsForSubmit[day]; return (s && s.status === '勤務') ? (!s.start || !s.end) : false; });
+          if (hasMissingTime) { setConfirmModal({ isOpen: true, title: '時間未入力エラー', message: '「勤務」の日は、出勤時間と退勤時間の両方を選択してください。', isAlert: true, onConfirm: null }); return; }
+
+          const unenteredDays = daysArray.filter(day => !currentShiftsForSubmit[day] || currentShiftsForSubmit[day].status === '未');
+          
+          // 未入力の日がある場合は確認モーダルを出す
+          if (unenteredDays.length > 0) {
+            setConfirmModal({ 
+              isOpen: true, 
+              title: '未入力の確認', 
+              message: `未入力の日付が ${unenteredDays.length} 日分あります。\nこれらをすべて「休」として提出してよろしいですか？\n（キャンセルを押すと自分で入力できます）`, 
+              isAlert: false, 
+              confirmText: '「休」にして提出',
+              checkboxLabel: '出勤調整可能日を選択する',
+              checkboxValue: false, // 初期値はオフ
+              unenteredDays: unenteredDays, // 対象の日付リストを渡す
+              adjustableDays: [], // 選択された日付を入れる箱（初期は空）
+              onConfirm: (isChecked, selectedDays) => executeSubmitShift(isSubmit, unenteredDays, isChecked ? selectedDays : [])
+            });
+            return;
+          }
+        }
+        
+        // 未入力がない（または途中保存）場合はそのまま保存処理へ
+        executeSubmitShift(isSubmit, [], []);
       };
 
       const handleChangeFormDay = (dayStr) => {
@@ -637,6 +713,9 @@
 
         fetchGAS('saveRecord', 'changeRequests', 'id', newReq)
           .then(() => {
+            const mon = parseInt(currentMonthStr.split('-')[1], 10);
+            fetchGAS('sendTeamsNotification', `🔔 **変更申請**\n${getDisplayName(currentUser.name)}さんから ${mon}月${changeForm.day}日 の変更申請が届きました。\n理由: ${changeForm.reason}`);
+
             setChangeRequests(prev => [newReq, ...prev]);
             setPendingChanges(prev => ({
               ...prev,
@@ -679,10 +758,25 @@
 
         const shiftRecord = { recordId: `${req.userId}_${targetMon}`, userId: req.userId, month: targetMon, status: (submissionStatus[targetMon] || {})[req.userId] || '提出済', shiftData: updatedShiftsForUser };
 
+        // ▼▼ スタッフ向けの通知データを作成 ▼▼
+        const daysStr = safeChanges.length > 0 ? safeChanges.map(c => c.day).join('日, ') + '日' : req.day + '日';
+        const notifyRecord = { id: `note_${Date.now()}_${req.userId}`, userId: req.userId, type: 'staff_alert', message: `【承認】${parseInt(targetMon.split('-')[1], 10)}月${daysStr}のシフト変更申請が承認され、シフトの窓口に反映されました。`, read: false, createdAt: new Date().toLocaleString('ja-JP') };
+
         fetchGAS('saveRecord', 'changeRequests', 'id', updatedReq)
           .then(() => fetchGAS('saveRecord', 'shifts', 'recordId', shiftRecord))
+          .then(() => fetchGAS('saveRecord', 'notifications', 'id', notifyRecord))
           .then(() => {
+            // ▼▼ 追加：スタッフへ結果メールを送信（処理した管理者の情報を付与） ▼▼
+            const staffUser = users.find(u => u.id === req.userId);
+            const mon = parseInt(targetMon.split('-')[1], 10);
+            if (staffUser && staffUser.email) {
+              const mailBody = `${getDisplayName(staffUser.name)}さん\n\nお疲れ様です。${getDisplayName(currentUser.name)}です。\n申請いただいた ${mon}月${daysStr} のシフト変更を承認し、シフトの窓口に反映しました。\nよろしくお願いします。`;
+              fetchGAS('sendAppEmail', staffUser.email, `【承認】シフト変更申請の結果`, mailBody, currentUser.email, getDisplayName(currentUser.name));
+            }
+
+            setAdminNotifications(prev => [notifyRecord, ...prev]);
             setShifts(prev => ({ ...prev, [targetMon]: { ...(prev[targetMon] || {}), [req.userId]: updatedShiftsForUser } }));
+
             setPendingChanges(prev => { 
               const uPending = { ...(prev[req.userId] || {}) }; 
               if (safeChanges.length > 0) {
@@ -708,10 +802,25 @@
         if (!req) { setIsLoading(false); return; }
         const updatedReq = { ...req, status: 'rejected', processedBy: getDisplayName(currentUser.name) };
 
+        // ▼▼ スタッフ向けの通知データを作成 ▼▼
+        const safeChanges = Array.isArray(req.changes) ? req.changes : [];
+        const daysStr = safeChanges.length > 0 ? safeChanges.map(c => c.day).join('日, ') + '日' : req.day + '日';
+        const targetMon = req.targetMonth || activeTargetMonth;
+        const notifyRecord = { id: `note_${Date.now()}_${req.userId}`, userId: req.userId, type: 'staff_alert', message: `【却下】${parseInt(targetMon.split('-')[1], 10)}月${daysStr}のシフト変更申請は、管理者により却下されました。`, read: false, createdAt: new Date().toLocaleString('ja-JP') };
+
         fetchGAS('saveRecord', 'changeRequests', 'id', updatedReq)
+          .then(() => fetchGAS('saveRecord', 'notifications', 'id', notifyRecord))
           .then(() => {
-            const safeChanges = Array.isArray(req.changes) ? req.changes : [];
-            setPendingChanges(prev => { 
+            // ▼▼ 追加：スタッフへ結果メールを送信（処理した管理者の情報を付与） ▼▼
+            const staffUser = users.find(u => u.id === req.userId);
+            const mon = parseInt(targetMon.split('-')[1], 10);
+            if (staffUser && staffUser.email) {
+              const mailBody = `${getDisplayName(staffUser.name)}さん\n\nお疲れ様です。${getDisplayName(currentUser.name)}です。\n申請いただいた ${mon}月${daysStr} のシフト変更ですが、今回はシフトの都合により却下となりました。\n詳細は直接またはメールでご相談ください。よろしくお願いします。`;
+              fetchGAS('sendAppEmail', staffUser.email, `【却下】シフト変更申請の結果`, mailBody, currentUser.email, getDisplayName(currentUser.name));
+            }
+
+            setAdminNotifications(prev => [notifyRecord, ...prev]);
+            setPendingChanges(prev => {
               const uPending = { ...(prev[req.userId] || {}) }; 
               if (safeChanges.length > 0) {
                 safeChanges.forEach(c => delete uPending[c.day]); 
@@ -796,7 +905,8 @@
         }
       };
 
-      const markNotificationAsRead = (id) => {
+      // ▼▼ スタッフ用の通知確認処理を追加 ▼▼
+      const dismissStaffAlert = (id) => {
         const note = adminNotifications.find(n => n.id === id); if(!note) return;
         const updatedNote = { ...note, read: true };
         setAdminNotifications(prev => prev.map(n => n.id === id ? updatedNote : n));
@@ -860,7 +970,9 @@
       };
 
       const handleExportCSV = () => {
-        let csv = "社員番号,名前,雇用区分,日付,ステータス,出勤,退勤,備考,月間コメント\n";
+        // ▼▼ 修正1：ヘッダー（1行目）に「調整可能」を追加 ▼▼
+        let csv = "社員番号,名前,雇用区分,日付,ステータス,出勤,退勤,調整可能,備考,月間コメント\n";
+        
         staffUsers.filter(u => u.status === 'active').forEach(u => {
           const mNote = (currentMonthShifts[u.id]?.monthlyNote || '').replace(/"/g, '""');
           const mNoteCsv = `"${mNote}"`;
@@ -868,7 +980,17 @@
             const s = currentMonthShifts[u.id]?.[d] || { status: '未' };
             const dNote = (s.note || '').replace(/"/g, '""');
             const dNoteCsv = `"${dNote}"`;
-            csv += `${u.employeeId},"${getDisplayName(u.name)}","${u.employmentCategory||''}",${currentMonth}/${d},${s.status},${s.start || ''},${s.end || ''},${dNoteCsv},${mNoteCsv}\n`;
+            
+            // 勤務、または「休（調整可）」の時に時間を出力する
+            const shouldOutputTime = s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded);
+            const outStart = shouldOutputTime ? (s.start || '') : '';
+            const outEnd = shouldOutputTime ? (s.end || '') : '';
+            
+            // ▼▼ 修正2：調整可能にチェックが入っていれば「〇」を出力 ▼▼
+            const isAdjustable = s.canWorkIfNeeded ? '〇' : '';
+            
+            // ▼▼ 修正3：データ行に isAdjustable を追加 ▼▼
+            csv += `${u.employeeId},"${getDisplayName(u.name)}","${u.employmentCategory||''}",${currentMonth}/${d},${s.status},${outStart},${outEnd},${isAdjustable},${dNoteCsv},${mNoteCsv}\n`;
           });
         });
         const link = document.createElement("a");
@@ -886,10 +1008,17 @@
 
       const handleTargetModeChange = (e) => {
         const mode = e.target.value; let selected = [];
-        if (mode === 'all') { selected = staffUsers.filter(u => u.status === 'active').map(u => u.id); } 
-        else if (mode === 'unsubmitted') { selected = staffUsers.filter(u => u.status === 'active' && activeMonthStatus[u.id] !== '提出済').map(u => u.id); } 
-        else if (mode === 'submitted') { selected = staffUsers.filter(u => u.status === 'active' && activeMonthStatus[u.id] === '提出済').map(u => u.id); } 
-        else { selected = [...mailForm.selectedUsers]; }
+        if (mode === 'all') { 
+          selected = staffUsers.filter(u => u.status === 'active').map(u => u.id); 
+        } else if (mode === 'unsubmitted') { 
+          selected = staffUsers.filter(u => u.status === 'active' && activeMonthStatus[u.id] !== '提出済').map(u => u.id); 
+        } else if (mode === 'submitted') { 
+          selected = staffUsers.filter(u => u.status === 'active' && activeMonthStatus[u.id] === '提出済').map(u => u.id); 
+        } else if (mode === 'individual') { 
+          selected = []; // 「個別に選択」に切り替えた時は空にする
+        } else { 
+          selected = [...mailForm.selectedUsers]; 
+        }
         setMailForm({ ...mailForm, targetMode: mode, selectedUsers: selected });
       };
 
@@ -991,6 +1120,68 @@
           Promise.all(updatePromises).then(() => { setShifts(newShifts); showToast(`固定シフトを反映しました`); setIsLoading(false); })
           .catch(() => { alert('システムとの接続に一部失敗しました。'); setIsLoading(false); });
         }});
+      };
+
+      // スタッフの表示順（上下）を移動する処理
+      const moveStaffOrder = (userId, direction) => {
+        const list = [...dbUsers.filter(u => u.employeeId !== '9999')].sort((a,b) => getOrder(a.id) - getOrder(b.id));
+        
+        const idx = list.findIndex(u => u.id === userId);
+        if (idx < 0) return;
+        if (direction === 'up' && idx === 0) return;
+        if (direction === 'down' && idx === list.length - 1) return;
+
+        const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+        const targetItem = list[idx];
+        
+        // 配列の中で対象ユーザーを抜き出し、目的の位置に挿入
+        list.splice(idx, 1);
+        list.splice(targetIdx, 0, targetItem);
+        
+        // 新しい順番のIDリストを作成して画面を更新
+        const newOrderIds = list.map(u => u.id);
+        setStaffOrder(newOrderIds);
+        
+        // スプレッドシートの「settings」シートに順番の配列を保存
+        setIsLoading(true);
+        fetchGAS('saveRecord', 'settings', 'key', { key: 'staffOrder', value: JSON.stringify(newOrderIds) })
+          .then(() => setIsLoading(false))
+          .catch(() => { alert('通信エラーが発生しました。'); setIsLoading(false); });
+      };
+
+      // 代理シフト入力用のState（対象月を保持できるように修正）
+      const [proxyShiftForm, setProxyShiftForm] = useState({ isOpen: false, userId: null, userName: '', shifts: {}, targetMonth: '' });
+
+      // 代理シフト入力フォームを開く処理
+      const openProxyShiftForm = (user) => {
+        const initShifts = {};
+        // ★ activeTargetMonth から currentMonthStr に修正
+        const currentShifts = shifts[currentMonthStr]?.[user.id] || {};
+        daysArray.forEach(d => {
+          initShifts[d] = currentShifts[d] || { status: '未', start: DEFAULT_START_TIME, end: DEFAULT_END_TIME, canWorkIfNeeded: false, note: '' };
+        });
+        setProxyShiftForm({ isOpen: true, userId: user.id, userName: getDisplayName(user.name), shifts: initShifts, targetMonth: currentMonthStr });
+      };
+
+      // 代理シフトの入力状態を更新する処理
+      const updateProxyShift = (day, field, value) => {
+        setProxyShiftForm(prev => ({ ...prev, shifts: { ...prev.shifts, [day]: { ...prev.shifts[day], [field]: value } } }));
+      };
+
+      // 代理シフトを保存する処理
+      const saveProxyShift = () => {
+        setIsLoading(true);
+        // ★ 保存先を proxyShiftForm.targetMonth に変更
+        const targetMon = proxyShiftForm.targetMonth || currentMonthStr; 
+        
+        const record = { recordId: `${proxyShiftForm.userId}_${targetMon}`, userId: proxyShiftForm.userId, month: targetMon, status: '提出済', shiftData: proxyShiftForm.shifts };
+        fetchGAS('saveRecord', 'shifts', 'recordId', record).then(() => {
+          setShifts(prev => ({ ...prev, [targetMon]: { ...(prev[targetMon] || {}), [proxyShiftForm.userId]: proxyShiftForm.shifts } }));
+          setSubmissionStatus(prev => ({ ...prev, [targetMon]: { ...(prev[targetMon] || {}), [proxyShiftForm.userId]: '提出済' } }));
+          setProxyShiftForm({ isOpen: false, userId: null, userName: '', shifts: {}, targetMonth: '' });
+          showToast(`${proxyShiftForm.userName} さんの ${targetMon.split('-')[1]}月分シフトを代理保存しました`);
+          setIsLoading(false);
+        }).catch(() => { alert('保存に失敗しました。'); setIsLoading(false); });
       };
 
       const renderHeaderAndTabs = () => (
@@ -1140,11 +1331,12 @@
       const pendingApprovalCount = changeRequests.filter(req => req.status === 'pending').length;
       const unreadNotificationCount = adminNotifications.filter(n => !n.read).length;
 
-      const filteredDbUsers = dbUsers.filter(u => 
+      // 並び順（staffOrder）の基準でソートする処理に変更
+      const filteredDbUsers = [...dbUsers].filter(u => 
         (u.name || '').includes(staffSearchQuery) || 
         (u.employeeId || '').includes(staffSearchQuery) ||
         (u.employmentCategory || '').includes(staffSearchQuery)
-      );
+      ).sort((a, b) => getOrder(a.id) - getOrder(b.id));
 
       const filteredShiftUsers = staffUsers.filter(u => {
         if (displayFilter === 'admin' && u.role !== 'admin') return false;
@@ -1165,11 +1357,34 @@
           {view === 'staff' && (() => {
             const myShifts = safeUserId ? (currentMonthShifts[safeUserId] || {}) : {};
             const isBaseDisabled = isConfirmed || !isActiveMonth; 
+            const staffAlerts = adminNotifications.filter(n => n.type === 'staff_alert' && n.userId === safeUserId && !n.read);
 
             return (
               <div className="max-w-4xl mx-auto p-3 sm:p-4 space-y-3 sm:space-y-4 animate-fade-in mt-2">
+                {/* ▼▼ 追加: 強調表示されるスタッフ向け通知ポップアップ ▼▼ */}
+                {staffAlerts.length > 0 && (
+                  <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[99999] p-4 animate-fade-in backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+                      <div className="bg-gradient-to-r from-orange-500 to-red-500 px-5 py-4 text-white font-black text-xl flex items-center justify-center gap-3">
+                        <Icon name="bell" className="animate-bounce" size={24} /> 重要なお知らせ
+                      </div>
+                      <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto bg-orange-50/30">
+                        {staffAlerts.map(note => (
+                          <div key={note.id} className="bg-white border-l-4 border-orange-500 p-4 rounded-r-md shadow-md">
+                            <p className="text-gray-800 font-bold text-base sm:text-lg leading-relaxed">{note.message}</p>
+                            <p className="text-xs text-gray-400 mt-2 text-right">{note.createdAt}</p>
+                            <button onClick={() => dismissStaffAlert(note.id)} className="mt-4 w-full bg-orange-100 hover:bg-orange-200 text-orange-800 font-bold py-2.5 rounded-md transition-colors border border-orange-200 flex justify-center items-center gap-2">
+                              <Icon name="check-circle" /> 確認しました
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-3 bg-white p-4 rounded-md shadow-sm border border-gray-200">
-                  <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xl font-bold">
+                <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xl font-bold">
                     {currentUser.name ? currentUser.name.charAt(0) : 'S'}
                   </div>
                   <div>
@@ -1475,7 +1690,8 @@
           {/* 管理者用コンテンツ */}
           {/* ==================================================== */}
           {view === 'admin' && (() => {
-            const unreadCount = adminNotifications.filter(n => !n.read).length + pendingReqs.length;
+            const adminNotes = adminNotifications.filter(n => n.type !== 'staff_alert'); // ←スタッフ用を除外
+            const unreadCount = adminNotes.filter(n => !n.read).length + pendingReqs.length;
 
             return (
               <div className="flex-1 p-3 sm:p-5 max-w-[1400px] mx-auto w-full space-y-4 sm:space-y-6 mt-2 sm:mt-4">
@@ -1558,7 +1774,7 @@
                                     <div className="mb-4">
                                       <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-1.5"><Icon name="tag" className="text-indigo-500"/> 勤怠種別を選択 <span className="text-red-500 text-xs">*必須</span></label>
                                       <div className="flex flex-wrap gap-2">
-                                        {['出勤', '遅刻', '早退', '欠勤', '時間変更', '有休'].map(type => (
+                                        {['出勤', '遅刻', '早退', '欠勤', '休み', '時間変更', '有休'].map(type => (
                                           <label key={type} className={`cursor-pointer px-3 py-1.5 rounded-md border text-xs font-bold ${attStatus === type ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-50 text-gray-600'}`}>
                                             <input type="radio" className="hidden" checked={attStatus === type} onChange={() => setAdminAttendanceStatuses(prev => ({...prev, [req.id]: type}))} /> {type}
                                           </label>
@@ -1581,7 +1797,7 @@
                                 </div>
                               );
                             })}
-                            {adminNotifications.map(note => (
+                            {adminNotes.map(note => (
                               <div key={note.id} className="p-4 flex justify-between items-start gap-4 bg-white">
                                 <p className={`text-base ${note.read ? 'text-gray-500' : 'text-gray-900 font-bold'}`}>{note.message}</p>
                                 {!note.read && <button onClick={() => markNotificationAsRead(note.id)} className="shrink-0 rounded-md text-sm border hover:bg-gray-100 px-4 py-2 font-medium shadow-sm">既読</button>}
@@ -1667,12 +1883,15 @@
                       <div className="bg-white rounded-md shadow-sm border mt-2 relative flex flex-col">
                         <div 
                           className="overflow-x-scroll overflow-y-hidden" 
-                          style={{ minHeight: '14px' }}
+                          style={{ minHeight: '14px', WebkitOverflowScrolling: 'touch' }}
                           onScroll={(e) => {
+                            if (isScrollingRef.current) return;
+                            isScrollingRef.current = true;
                             const tableContainer = document.getElementById('month-table-container');
                             if (tableContainer && tableContainer.scrollLeft !== e.target.scrollLeft) {
                               tableContainer.scrollLeft = e.target.scrollLeft;
                             }
+                            window.requestAnimationFrame(() => { isScrollingRef.current = false; });
                           }}
                         >
                           <div style={{ width: '1200px', height: '1px' }}></div>
@@ -1681,11 +1900,15 @@
                         <div 
                           id="month-table-container"
                           className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-200px)] min-h-[600px] no-scrollbar flex-1"
+                          style={{ WebkitOverflowScrolling: 'touch', willChange: 'transform' }}
                           onScroll={(e) => {
+                            if (isScrollingRef.current) return;
+                            isScrollingRef.current = true;
                             const topScrollbar = e.target.previousElementSibling;
                             if (topScrollbar && topScrollbar.scrollLeft !== e.target.scrollLeft) {
                               topScrollbar.scrollLeft = e.target.scrollLeft;
                             }
+                            window.requestAnimationFrame(() => { isScrollingRef.current = false; });
                           }}
                         >
                           <table className="w-full text-left whitespace-nowrap bg-white border-collapse min-w-[1200px]">
@@ -1732,17 +1955,11 @@
 
                                   return (
                                     <tr 
-                                    key={`row-${user.id}`} 
-                                    draggable={true}
-                                    onDragStart={(e) => onDragStart(e, user.id)}
-                                    onDragOver={(e) => onDragOver(e, user.id)}
-                                    onDragLeave={(e) => onDragLeave(e, user.id)}
-                                    onDrop={(e) => onDrop(e, user.id)}
-                                    onDragEnd={onDragEnd}
-                                    className={`h-[46px] relative transition-colors ${dragOverStaffId === user.id ? 'bg-indigo-100 border-t-4 border-indigo-500 z-[80]' : 'hover:bg-blue-50/30 hover:z-[70]'} ${draggedStaffId === user.id ? 'opacity-30 bg-gray-100' : ''}`}
-                                  >
-                                    <td className="px-3 py-1.5 font-medium sticky left-0 bg-white border-r-2 z-[40] hover:z-[70]">
-                                      <div className="flex justify-between items-center mb-0.5 gap-2">
+                                      key={`row-${user.id}`} 
+                                      className="h-[46px] relative transition-colors hover:bg-blue-50/30 hover:z-[70]"
+                                    >
+                                      <td className="px-3 py-1.5 font-medium sticky left-0 bg-white border-r-2 z-[40] hover:z-[70]">
+                                        <div className="flex justify-between items-center mb-0.5 gap-2">
                                           <div className="flex flex-col flex-1 min-w-0">
                                             <div className="flex items-center gap-1.5">
                                               <span className="font-bold text-sm truncate" title={getDisplayName(user.name)}>{getDisplayName(user.name)}</span>
@@ -1755,9 +1972,11 @@
                                             </div>
                                             <span className="text-[10px] text-gray-500 truncate mt-0.5">{user.employmentCategory || '未設定'}</span>
                                           </div>
-                                          <div className="flex flex-col gap-1 shrink-0">
-                                            <div className="flex items-center justify-center bg-gray-50 border rounded text-gray-400 hover:bg-indigo-100 hover:text-indigo-600 transition-colors cursor-grab active:cursor-grabbing p-1" title="ドラッグして並び替え">
-                                              <Icon name="grip-vertical" size={14} />
+                                          {/* ▼ ドラッグを廃止し、横並びの矢印ボタンに変更（高さ拡張を防ぐ） */}
+                                          <div className="flex items-center gap-1.5 shrink-0">
+                                            <div className="flex gap-0.5 bg-gray-50 border rounded p-0.5">
+                                              <button onClick={() => moveStaffOrder(user.id, 'up')} className="px-1 text-gray-400 hover:text-indigo-600"><Icon name="arrow-up" size={10} /></button>
+                                              <button onClick={() => moveStaffOrder(user.id, 'down')} className="px-1 text-gray-400 hover:text-indigo-600"><Icon name="arrow-down" size={10} /></button>
                                             </div>
                                             <button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`p-1.5 rounded-md shrink-0 shadow-sm relative z-30 ${personalNotes[user.id] ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' : 'bg-gray-100 text-gray-400 border border-gray-200'}`}><Icon name="comment-dots" size={14} /></button>
                                           </div>
@@ -1840,7 +2059,7 @@
                         
                         {currentDailyNotes[selectedDay] && (<div className={`border-b text-sm font-bold px-4 py-2.5 text-center whitespace-pre-wrap ${currentDailyNotes[selectedDay].includes('休刊日') ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-red-50 text-red-600 border-red-200'}`}><Icon name="comment-dots" className="mr-1.5" /> {currentDailyNotes[selectedDay]}</div>)}
 
-                        <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-200px)] min-h-[600px] no-scrollbar border-t mt-2 relative">
+                        <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-200px)] min-h-[600px] no-scrollbar border-t mt-2 relative" style={{ WebkitOverflowScrolling: 'touch', willChange: 'transform' }}>
                           <div className="min-w-[1100px]">
                             <div className="flex border-b bg-gray-100 text-sm font-bold text-gray-500 sticky top-0 z-[50] shadow-sm">
                               <div className="w-64 shrink-0 px-5 py-3 border-r text-base bg-gray-100 sticky left-0 z-[60]">スタッフ / 実働時間</div>
@@ -1857,16 +2076,10 @@
                                   
                                   return (
                                     <div 
-                                    key={user.id} 
-                                    draggable={true}
-                                    onDragStart={(e) => onDragStart(e, user.id)}
-                                    onDragOver={(e) => onDragOver(e, user.id)}
-                                    onDragLeave={(e) => onDragLeave(e, user.id)}
-                                    onDrop={(e) => onDrop(e, user.id)}
-                                    onDragEnd={onDragEnd}
-                                    className={`flex items-center group min-h-[3.25rem] py-1 relative transition-colors ${dragOverStaffId === user.id ? 'bg-indigo-100 border-t-4 border-indigo-500 z-[80]' : 'hover:bg-blue-50/30 hover:z-[70]'} ${draggedStaffId === user.id ? 'opacity-30 bg-gray-100' : ''}`}
-                                  >
-                                    <div className="w-64 shrink-0 px-5 border-r flex flex-col justify-center bg-white sticky left-0 z-[40] group-hover:bg-blue-50/50 min-h-[2.5rem] hover:z-[70]">
+                                      key={user.id} 
+                                      className="flex items-center group min-h-[3.25rem] py-1 relative transition-colors hover:bg-blue-50/30 hover:z-[70]"
+                                    >
+                                      <div className="w-64 shrink-0 px-4 border-r flex flex-col justify-center bg-white sticky left-0 z-[40] group-hover:bg-blue-50/50 min-h-[2.5rem] hover:z-[70]">
                                         <div className="flex items-center justify-between gap-2">
                                           <div className="flex flex-col flex-1 min-w-0">
                                             <div className="flex items-center gap-1.5">
@@ -1880,15 +2093,15 @@
                                             </div>
                                             <span className="text-[10px] text-gray-500 truncate mt-0.5">{user.employmentCategory || '未設定'}</span>
                                           </div>
-                                          <div className="flex flex-col items-end gap-1 shrink-0">
-                                            <div className="flex items-center gap-1">
+                                          {/* ▼ ドラッグを廃止し、横並びの矢印ボタンに変更 */}
+                                          <div className="flex flex-col items-end shrink-0">
+                                            <div className="flex items-center gap-1.5">
                                               {pendingChanges[user.id]?.[selectedDay] && <span className="bg-orange-500 rounded-md text-white text-[10px] font-bold px-2 py-0.5 animate-pulse">申請</span>}
-                                              <button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`p-1.5 rounded-md border shadow-sm relative z-30 ${personalNotes[user.id] ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-400'}`}><Icon name="comment-dots" size={14} /></button>
-                                            </div>
-                                            <div className="flex gap-1 mt-0.5">
-                                              <div className="px-2 py-0.5 bg-gray-50 hover:bg-indigo-100 border rounded text-gray-400 hover:text-indigo-600 transition-colors cursor-grab active:cursor-grabbing" title="ドラッグして並び替え">
-                                                <Icon name="grip-lines" size={14} />
+                                              <div className="flex gap-0.5 bg-gray-50 border rounded p-0.5">
+                                                <button onClick={() => moveStaffOrder(user.id, 'up')} className="px-1 text-gray-400 hover:text-indigo-600"><Icon name="arrow-up" size={10} /></button>
+                                                <button onClick={() => moveStaffOrder(user.id, 'down')} className="px-1 text-gray-400 hover:text-indigo-600"><Icon name="arrow-down" size={10} /></button>
                                               </div>
+                                              <button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`p-1.5 rounded-md border shadow-sm relative z-30 ${personalNotes[user.id] ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-400'}`}><Icon name="comment-dots" size={14} /></button>
                                             </div>
                                           </div>
                                         </div>
@@ -1974,7 +2187,7 @@
                                 <tr key={req.id} className="hover:bg-gray-50">
                                   <td className="px-5 py-4 text-sm text-gray-500">{safeDate}</td>
                                   <td className="px-5 py-4 font-bold text-gray-800"><Icon name="user" className="mr-2 text-gray-400"/>{req.userName}</td>
-                                  <td className="px-5 py-4 font-bold text-indigo-600 text-lg text-center">{req.targetMonth ? `${req.targetMonth.split('-')[1]}/` : ''}{req.day}日</td>
+                                  <td className="px-5 py-4 font-bold text-indigo-600 text-lg text-center">{req.targetMonth ? `${parseInt(req.targetMonth.split('-')[1], 10)}/` : ''}{req.day}日</td>
                                   <td className="px-5 py-4 text-center"><span className="bg-gray-100 border text-gray-700 px-3 py-1 text-sm font-bold">{req.newVal?.changeCategory || '-'}</span></td>
                                   <td className="px-5 py-4 text-center"><span className="bg-indigo-50 border text-indigo-700 px-3 py-1 text-sm font-bold">{req.newVal?.attendanceStatus || '-'}</span></td>
                                   <td className="px-5 py-4 align-top"><span className="text-gray-400 line-through bg-gray-50 border px-3 py-1.5 text-sm block w-fit mx-auto">{formatShiftStr(req.oldVal)}</span></td>
@@ -2044,19 +2257,11 @@
                               if (isConfirmed && pendingChanges[user.id] && Object.keys(pendingChanges[user.id]).length > 0) { stColor = 'bg-orange-100 text-orange-700 border'; stText = '承認待ち'; }
 
                               return (
-                                <tr 
-                                  key={`table-${user.id}`} 
-                                  draggable={true}
-                                  onDragStart={(e) => onDragStart(e, user.id)}
-                                  onDragOver={(e) => onDragOver(e, user.id)}
-                                  onDragLeave={(e) => onDragLeave(e, user.id)}
-                                  onDrop={(e) => onDrop(e, user.id)}
-                                  onDragEnd={onDragEnd}
-                                  className={`transition-colors ${dragOverStaffId === user.id ? 'bg-indigo-100 border-t-4 border-indigo-500' : 'hover:bg-gray-50'} ${draggedStaffId === user.id ? 'opacity-30' : isRetired ? 'opacity-50' : ''}`}
-                                >
+                                <tr key={`table-${user.id}`} className={`transition-colors hover:bg-gray-50 ${isRetired ? 'opacity-50' : ''}`}>
                                   <td className="px-2 py-4 text-center">
-                                    <div className="flex justify-center items-center gap-1 cursor-grab active:cursor-grabbing text-gray-400 hover:text-indigo-600 p-2" title="ドラッグして並び替え">
-                                      <Icon name="grip-lines" size={18} />
+                                    <div className="flex flex-col items-center gap-1">
+                                      <button onClick={() => moveStaffOrder(user.id, 'up')} className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-md text-gray-500 hover:text-indigo-600 transition-colors"><Icon name="arrow-up" size={12} /></button>
+                                      <button onClick={() => moveStaffOrder(user.id, 'down')} className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-md text-gray-500 hover:text-indigo-600 transition-colors"><Icon name="arrow-down" size={12} /></button>
                                     </div>
                                   </td>
                                   <td className="px-5 py-4 font-mono text-gray-600 font-bold">{user.employeeId}</td>
@@ -2071,6 +2276,7 @@
                                   <td className="px-5 py-4 text-center align-middle">{!isRetired ? <span className={`inline-block whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-bold ${stColor}`}>{stText}</span> : '-'}</td>
                                   <td className="px-5 py-4">
                                     <div className="flex justify-center gap-2">
+                                      {!isRetired && (<div className="tooltip-container"><button onClick={() => openProxyShiftForm(user)} className="w-10 h-10 flex justify-center items-center bg-purple-50 text-purple-600 border border-purple-200 hover:bg-purple-100 rounded-md shadow-sm"><Icon name="user-astronaut" size={18} /></button><span className="tooltip-text">代理でシフト入力</span></div>)}
                                       {!isRetired && (<div className="tooltip-container"><button type="button" onClick={(e) => { e.stopPropagation(); setEditStaffForm({ isOpen: true, user: user, name: getDisplayName(user.name), email: user.email || '', employmentCategory: user.employmentCategory || '', isAdmin: user.role === 'admin' }); }} className="w-10 h-10 flex justify-center items-center rounded-md border shadow-sm bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"><Icon name="pen" size={16} /></button><span className="tooltip-text">情報編集</span></div>)}
                                       {!isRetired && (<div className="tooltip-container"><button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`w-10 h-10 flex justify-center items-center rounded-md border ${personalNotes[user.id] ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-50 text-gray-500'}`}><Icon name="comment-dots" size={18} /></button><span className="tooltip-text">個人宛メッセージ</span></div>)}
                                       {!isRetired && (<div className="tooltip-container"><button onClick={() => openFixedShiftForm(user)} className="w-10 h-10 flex justify-center items-center bg-emerald-50 text-emerald-600 border rounded-md"><Icon name="calendar-day" size={18} /></button><span className="tooltip-text">曜日固定シフト</span></div>)}
@@ -2094,16 +2300,7 @@
                           if (isConfirmed && pendingChanges[user.id] && Object.keys(pendingChanges[user.id]).length > 0) { stColor = 'bg-orange-100 text-orange-700 border'; stText = '承認待ち'; }
 
                           return (
-                            <div 
-                              key={`card-${user.id}`} 
-                              draggable={true}
-                              onDragStart={(e) => onDragStart(e, user.id)}
-                              onDragOver={(e) => onDragOver(e, user.id)}
-                              onDragLeave={(e) => onDragLeave(e, user.id)}
-                              onDrop={(e) => onDrop(e, user.id)}
-                              onDragEnd={onDragEnd}
-                              className={`border rounded-md p-4 shadow-sm flex flex-col gap-3 transition-colors ${dragOverStaffId === user.id ? 'bg-indigo-100 border-indigo-500 scale-[1.02] z-50 shadow-md' : 'bg-white'} ${draggedStaffId === user.id ? 'opacity-30' : isRetired ? 'opacity-60 bg-gray-50' : ''}`}
-                            >
+                            <div key={`card-${user.id}`} className={`border rounded-md p-4 bg-white shadow-sm flex flex-col gap-3 transition-colors ${isRetired ? 'opacity-60 bg-gray-50' : ''}`}>
                               <div className="flex justify-between items-start gap-2">
                                 <div className="flex flex-col">
                                   <div className="flex items-center flex-wrap gap-2 font-bold text-gray-800 text-base">
@@ -2114,14 +2311,16 @@
                                   <div className="text-xs text-gray-500 mt-1 font-mono">ID: {user.employeeId} / {user.employmentCategory || '未設定'}</div>
                                 </div>
                                 <div className="flex flex-col items-end gap-2">
-                                  <div className="flex items-center gap-1 bg-gray-50 border rounded-md px-3 py-1 cursor-grab active:cursor-grabbing text-gray-400" title="ドラッグして並び替え">
-                                    <Icon name="grip-lines" size={14} />
+                                  <div className="flex gap-1 bg-gray-50 border rounded-md p-1">
+                                    <button onClick={() => moveStaffOrder(user.id, 'up')} className="px-3 py-1 bg-white hover:bg-indigo-50 border rounded text-gray-500 hover:text-indigo-600"><Icon name="arrow-up" size={12} /></button>
+                                    <button onClick={() => moveStaffOrder(user.id, 'down')} className="px-3 py-1 bg-white hover:bg-indigo-50 border rounded text-gray-500 hover:text-indigo-600"><Icon name="arrow-down" size={12} /></button>
                                   </div>
                                   {!isRetired ? <span className={`inline-block whitespace-nowrap px-3 py-1.5 rounded-md text-[10px] font-bold ${stColor}`}>{stText}</span> : <span className="text-gray-400 text-sm font-bold">-</span>}
                                 </div>
                               </div>
                               
                               <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 mt-1">
+                                {!isRetired && (<button onClick={() => openProxyShiftForm(user)} className="w-10 h-10 flex justify-center items-center bg-purple-50 text-purple-600 border border-purple-200 hover:bg-purple-100 rounded-md shadow-sm"><Icon name="user-astronaut" size={18} /></button>)}
                                 {!isRetired && (<button type="button" onClick={(e) => { e.stopPropagation(); setEditStaffForm({ isOpen: true, user: user, name: getDisplayName(user.name), email: user.email || '', employmentCategory: user.employmentCategory || '', isAdmin: user.role === 'admin' }); }} className="w-10 h-10 flex justify-center items-center rounded-md border shadow-sm bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"><Icon name="pen" size={16} /></button>)}
                                 {!isRetired && (<button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`w-10 h-10 flex justify-center items-center rounded-md border shadow-sm ${personalNotes[user.id] ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-gray-50 text-gray-500'}`}><Icon name="comment-dots" size={18} /></button>)}
                                 {!isRetired && (<button onClick={() => openFixedShiftForm(user)} className="w-10 h-10 flex justify-center items-center bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-md shadow-sm"><Icon name="calendar-day" size={18} /></button>)}
@@ -2313,7 +2512,6 @@
             </div>
           )}
 
-          {/* 追加：スタッフ情報編集モーダル */}
           {editStaffForm.isOpen && (
             <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
               <div className="bg-white rounded-lg shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
@@ -2430,14 +2628,183 @@
             );
           })()}
 
-          {confirmModal.isOpen && (
+          {proxyShiftForm.isOpen && (
             <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe">
-              <div className="bg-white rounded-lg w-full max-w-md flex flex-col">
-                <div className={`${confirmModal.title.includes('エラー') || confirmModal.title.includes('警告') ? 'bg-red-600' : confirmModal.title.includes('完了') ? 'bg-blue-600' : 'bg-yellow-500'} px-5 py-4 text-white font-bold flex gap-2`}><Icon name={confirmModal.title.includes('エラー') || confirmModal.title.includes('警告') ? 'exclamation-triangle' : confirmModal.title.includes('完了') ? 'check-circle' : 'info-circle'} /> {confirmModal.title}</div>
-                <div className="p-6 font-medium space-y-2 whitespace-pre-wrap">{confirmModal.message}</div>
-                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t">
-                  {!confirmModal.isAlert && <button onClick={() => setConfirmModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null, isAlert: false })} className="px-5 py-2.5 font-bold text-gray-600">キャンセル</button>}
-                  <button onClick={() => { if(confirmModal.onConfirm) confirmModal.onConfirm(); setConfirmModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null, isAlert: false }); }} className={`px-6 py-2.5 rounded-md font-bold text-white ${confirmModal.title.includes('エラー') || confirmModal.title.includes('警告') ? 'bg-red-600' : 'bg-blue-600'}`}>{confirmModal.isAlert ? 'OK' : '実行する'}</button>
+              <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="bg-purple-600 px-5 py-4 text-white font-bold text-lg flex justify-between shrink-0">
+                  <div className="flex items-center gap-3"><Icon name="user-astronaut" size={20} />{proxyShiftForm.userName} さんの代理登録 ({currentMonth}月)</div>
+                  <button onClick={() => setProxyShiftForm({...proxyShiftForm, isOpen: false})}><Icon name="times" size={20}/></button>
+                </div>
+                {/* 横スクロールをなくし、w-fullで画面幅に固定します */}
+                <div className="overflow-y-auto flex-1 p-1 sm:p-4 bg-gray-50">
+                  <div className="divide-y divide-gray-200 border rounded-md bg-white w-full">
+                    {daysArray.map(day => {
+                      const shiftData = proxyShiftForm.shifts[day] || { status: '未', start: DEFAULT_START_TIME, end: DEFAULT_END_TIME, canWorkIfNeeded: false, note: '' };
+                      const isWorking = shiftData.status === '勤務'; 
+                      const isRest = shiftData.status === '休';
+                      
+                      return (
+                        <div key={day} className={`flex flex-row items-center gap-1 sm:gap-4 p-1.5 sm:px-4 sm:py-3 transition-colors w-full overflow-hidden ${isWorking ? 'bg-blue-50/30' : isRest && shiftData.canWorkIfNeeded ? 'bg-orange-50/30' : 'bg-white'}`}>
+                          
+                          {/* 1. 日付と日別メモ */}
+                          <div className="flex flex-col items-center justify-center w-8 sm:w-24 shrink-0">
+                            <span className={`text-sm sm:text-xl font-black leading-none ${getDayColor(day)}`}>{day}</span>
+                            <span className={`text-[8px] sm:text-sm font-bold leading-tight ${getDayColor(day)}`}>({getDayOfWeek(day)})</span>
+                            {currentDailyNotes[day] && (
+                              <div className={`text-[8px] sm:text-[10px] font-bold px-0.5 py-0.5 mt-0.5 rounded-sm text-center leading-tight w-full truncate ${currentDailyNotes[day].includes('休刊日') ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`} title={currentDailyNotes[day]}>
+                                {currentDailyNotes[day]}
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* 2. ステータスボタン (スマホでは幅と文字を極小化) */}
+                          <div className="flex gap-0.5 sm:gap-2 shrink-0">
+                            <button onClick={() => updateProxyShift(day, 'status', '未')} className={`w-6 sm:w-14 py-1 sm:py-2 rounded text-[10px] sm:text-sm font-bold border px-0 ${shiftData.status === '未' ? 'bg-gray-600 text-white' : 'bg-white text-gray-500'}`}>未</button>
+                            <button onClick={() => updateProxyShift(day, 'status', '休')} className={`w-6 sm:w-14 py-1 sm:py-2 rounded text-[10px] sm:text-sm font-bold border px-0 ${shiftData.status === '休' ? 'bg-red-500 text-white' : 'bg-white text-gray-700'}`}>休</button>
+                            <button onClick={() => updateProxyShift(day, 'status', '有休')} className={`w-8 sm:w-14 py-1 sm:py-2 rounded text-[10px] sm:text-sm font-bold border px-0 ${shiftData.status === '有休' ? 'bg-teal-500 text-white' : 'bg-white text-gray-700'}`}>有休</button>
+                            <button onClick={() => updateProxyShift(day, 'status', '勤務')} className={`w-8 sm:w-14 py-1 sm:py-2 rounded text-[10px] sm:text-sm font-bold border px-0 ${isWorking ? 'bg-blue-600 text-white' : 'bg-white text-blue-700'}`}>勤務</button>
+                          </div>
+                          
+                          {/* 3. 右側エリア（時間・調整可・備考）をフレックスで残りの幅に柔軟に収める */}
+                          <div className="flex flex-1 items-center gap-1 sm:gap-2 min-w-0 justify-end">
+                            
+                            {/* 時間入力 */}
+                            {(isWorking || (isRest && shiftData.canWorkIfNeeded)) && (
+                              <div className="flex items-center shrink-0">
+                                <select value={shiftData.start} onChange={(e) => updateProxyShift(day, 'start', e.target.value)} className="bg-white border rounded py-1 px-0 w-11 sm:w-20 text-center text-[10px] sm:text-sm appearance-none" style={{textAlignLast:'center'}}>{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
+                                <span className="text-gray-400 font-bold mx-0.5 sm:mx-1 text-[10px] sm:text-sm">~</span>
+                                <select value={shiftData.end} onChange={(e) => updateProxyShift(day, 'end', e.target.value)} className="bg-white border rounded py-1 px-0 w-11 sm:w-20 text-center text-[10px] sm:text-sm appearance-none" style={{textAlignLast:'center'}}>{HOUR_OPTIONS.map(t => <option key={t} value={t}>{t || '--:--'}</option>)}</select>
+                              </div>
+                            )}
+                            
+                            {/* 調整可チェック (スマホでは「可」の1文字に省略して幅を節約) */}
+                            {isRest && (
+                              <label className="flex items-center gap-0.5 bg-gray-50 px-1 sm:px-3 py-1 sm:py-1.5 rounded border shrink-0">
+                                <input type="checkbox" checked={shiftData.canWorkIfNeeded} onChange={() => updateProxyShift(day, 'canWorkIfNeeded', !shiftData.canWorkIfNeeded)} className="w-3 h-3 sm:w-4 sm:h-4 accent-orange-500 shrink-0" />
+                                <span className="text-[10px] sm:text-xs font-bold text-gray-600 whitespace-nowrap hidden sm:inline">調整可</span>
+                                <span className="text-[10px] font-bold text-gray-600 whitespace-nowrap sm:hidden">可</span>
+                              </label>
+                            )}
+                            
+                            {/* 備考欄 (flex-1 min-w-[2rem] を指定し、潰れすぎない程度に余った幅を全て埋める) */}
+                            {shiftData.status !== '未' && (
+                              <input type="text" value={shiftData.note || ''} onChange={(e) => updateProxyShift(day, 'note', e.target.value)} placeholder="備考" className="flex-1 min-w-[2rem] sm:w-32 bg-white border border-gray-300 text-[10px] sm:text-sm rounded px-1 sm:px-2 py-1 sm:py-1.5 focus:ring-1 focus:ring-purple-300 outline-none truncate" />
+                            )}
+                          </div>
+                          
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-white px-5 py-4 flex justify-end gap-3 border-t shrink-0">
+                  <button onClick={() => setProxyShiftForm({...proxyShiftForm, isOpen: false})} className="px-5 py-2.5 font-bold text-gray-600 border rounded-md hover:bg-gray-50">キャンセル</button>
+                  <button onClick={saveProxyShift} className="px-6 py-2.5 font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-md shadow-sm">代理で提出する</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {confirmModal.isOpen && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] p-4 animate-fade-in pb-safe backdrop-blur-sm">
+              <div className="bg-white rounded-lg w-full max-w-md flex flex-col shadow-2xl overflow-hidden max-h-[90vh]">
+                <div className={`${confirmModal.title.includes('エラー') || confirmModal.title.includes('警告') ? 'bg-red-600' : confirmModal.title.includes('完了') ? 'bg-blue-600' : 'bg-yellow-500'} px-5 py-4 text-white font-bold flex gap-2 shrink-0 items-center`}><Icon name={confirmModal.title.includes('エラー') || confirmModal.title.includes('警告') ? 'exclamation-triangle' : confirmModal.title.includes('完了') ? 'check-circle' : 'info-circle'} /> {confirmModal.title}</div>
+                
+                <div className="p-6 font-medium space-y-2 whitespace-pre-wrap overflow-y-auto flex-1">
+                  <p className="text-gray-700 leading-relaxed">{confirmModal.message}</p>
+                  
+                  {confirmModal.checkboxLabel && confirmModal.unenteredDays && (
+                    <div className="mt-6 border-t pt-5">
+                      <label className="flex items-center gap-3 p-4 bg-orange-50 border border-orange-200 rounded-lg cursor-pointer hover:bg-orange-100 transition-colors shadow-sm">
+                        <input type="checkbox" checked={confirmModal.checkboxValue || false} onChange={(e) => setConfirmModal(prev => ({...prev, checkboxValue: e.target.checked}))} className="w-6 h-6 accent-orange-600 shrink-0" />
+                        <span className="font-bold text-orange-950 text-base">{confirmModal.checkboxLabel}</span>
+                      </label>
+                      
+                      {/* ▼▼ チェックが入ったらカレンダー表示 ▼▼ */}
+                      {confirmModal.checkboxValue && (
+                        <div className="mt-4 p-5 bg-white border border-gray-200 rounded-lg shadow-inner animate-fade-in">
+                          <p className="text-sm font-bold text-gray-700 mb-4 flex items-center gap-2"><Icon name="calendar-alt" className="text-orange-500"/> 調整可能な日を選択（未入力日のみ表示）</p>
+                          
+                          {(() => {
+                            // カレンダー生成ロジック
+                            const [year, month] = activeTargetMonth.split('-').map(Number);
+                            const firstDayOfWeek = new Date(year, month - 1, 1).getDay(); // 0(日)〜6(土)
+                            const daysInMonth = new Date(year, month, 0).getDate();
+                            const calendarDays = [];
+                            
+                            // 最初の週の空白
+                            for (let i = 0; i < firstDayOfWeek; i++) { calendarDays.push(null); }
+                            // 日付を入れる
+                            for (let i = 1; i <= daysInMonth; i++) { calendarDays.push(i); }
+                            
+                            const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+                            
+                            return (
+                              <div className="border border-gray-200 rounded-md overflow-hidden">
+                                {/* 曜日ヘッダー */}
+                                <div className="grid grid-cols-7 bg-gray-100 border-b border-gray-200 text-center">
+                                  {weekdays.map((wd, i) => (
+                                    <div key={wd} className={`py-2 text-xs font-bold ${i === 0 ? 'text-red-600' : i === 6 ? 'text-blue-600' : 'text-gray-700'}`}>{wd}</div>
+                                  ))}
+                                </div>
+                                {/* 日付グリッド */}
+                                <div className="grid grid-cols-7 gap-1 p-1.5 bg-gray-50/50">
+                                  {calendarDays.map((day, index) => {
+                                    if (day === null) return <div key={`empty-${index}`} className="aspect-square"></div>;
+                                    
+                                    // その日が「未入力」かどうかチェック
+                                    const isUnentered = confirmModal.unenteredDays.includes(day);
+                                    const isSelected = (confirmModal.adjustableDays || []).includes(day);
+                                    const dayOfWeek = index % 7;
+                                    
+                                    return (
+                                      <button
+                                        key={day}
+                                        disabled={!isUnentered} // 未入力でない日は押せない
+                                        onClick={() => {
+                                          setConfirmModal(prev => {
+                                            const current = prev.adjustableDays || [];
+                                            const newSelected = isSelected ? current.filter(d => d !== day) : [...current, day].sort((a,b)=>a-b);
+                                            return { ...prev, adjustableDays: newSelected };
+                                          });
+                                        }}
+                                        className={`aspect-square rounded-md flex flex-col items-center justify-center border transition-all ${
+                                          !isUnentered 
+                                            ? 'bg-gray-100 text-gray-300 border-gray-100' // 入力済み（選択不可）
+                                            : isSelected
+                                              ? 'bg-orange-500 text-white border-orange-600 shadow-md font-bold scale-105' // 選択中
+                                              : `bg-white border-gray-200 hover:border-orange-400 hover:bg-orange-50 ${dayOfWeek === 0 ? 'text-red-600' : dayOfWeek === 6 ? 'text-blue-600' : 'text-gray-800'}` // 未選択
+                                        }`}
+                                      >
+                                        <span className="text-base font-bold">{day}</span>
+                                        {isSelected && <Icon name="check" size={10} className="mt-0.5" />}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                          <p className="text-xs text-gray-500 mt-3 border-t pt-2">※ すでにシフトを入力済みの日は選択できません。</p>
+                        </div>
+                      )}
+                      {/* ▲▲ ここまで追加 ▲▲ */}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="bg-gray-50 px-5 py-4 flex justify-end gap-3 border-t shrink-0">
+                  {!confirmModal.isAlert && <button onClick={() => setConfirmModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null, isAlert: false, unenteredDays: [], adjustableDays: [] })} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-100 rounded-md transition-colors">キャンセル</button>}
+                  <button 
+                    onClick={() => { 
+                      if(confirmModal.onConfirm) confirmModal.onConfirm(confirmModal.checkboxValue, confirmModal.adjustableDays || []); 
+                      setConfirmModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null, isAlert: false, checkboxLabel: '', checkboxValue: false, unenteredDays: [], adjustableDays: [] }); 
+                    }} 
+                    className={`px-6 py-2.5 rounded-md font-bold text-white shadow-sm transition-colors ${confirmModal.title.includes('エラー') || confirmModal.title.includes('警告') ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+                  >
+                    {confirmModal.confirmText || (confirmModal.isAlert ? 'OK' : '実行する')}
+                  </button>
                 </div>
               </div>
             </div>
