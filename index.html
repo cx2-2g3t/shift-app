@@ -819,14 +819,14 @@
               const staffLastName = getDisplayName(staffUser.name).split(/[ \u3000]+/)[0];
               const adminLastName = getDisplayName(currentUser.name).split(/[ \u3000]+/)[0];
               
-              // ▼▼ 修正：titleではなく、subject(件名)の中に「承認」があるかを探す ▼▼
-              const template = templates.find(t => t.subject && t.subject.includes('承認'));
+              // ▼▼ 修正：正しい変数名(emailTemplates)とプロパティ名(name)を使用 ▼▼
+              const template = emailTemplates.find(t => t.name && t.name.includes('承認'));
               
               let subjectStr = `【承認】シフト変更申請の結果`;
               let bodyStr = `${staffLastName}さん\n\nお疲れ様です。${adminLastName}です。\n申請いただいた ${mon}月${daysStr} のシフト変更を承認し、シフトの窓口に反映しました。\nよろしくお願いします。`;
 
               if (template) {
-                subjectStr = (template.subject || subjectStr)
+                subjectStr = (template.name || subjectStr)
                   .replace(/{userName}/g, staffLastName)
                   .replace(/{processedBy}/g, adminLastName)
                   .replace(/{month}/g, String(mon))
@@ -890,14 +890,14 @@
               const staffLastName = getDisplayName(staffUser.name).split(/[ \u3000]+/)[0];
               const adminLastName = getDisplayName(currentUser.name).split(/[ \u3000]+/)[0];
 
-              // ▼▼ 修正：titleではなく、subject(件名)の中に「却下」があるかを探す ▼▼
-              const template = templates.find(t => t.subject && t.subject.includes('却下'));
+              // ▼▼ 修正：正しい変数名(emailTemplates)とプロパティ名(name)を使用 ▼▼
+              const template = emailTemplates.find(t => t.name && t.name.includes('却下'));
 
               let subjectStr = `【却下】シフト変更申請の結果`;
               let bodyStr = `${staffLastName}さん\n\nお疲れ様です。${adminLastName}です。\n申請いただいた ${mon}月${daysStr} のシフト変更ですが、今回はシフトの都合により却下となりました。\n詳細は直接またはチャット等でご相談ください。よろしくお願いします。`;
 
               if (template) {
-                subjectStr = (template.subject || subjectStr)
+                subjectStr = (template.name || subjectStr)
                   .replace(/{userName}/g, staffLastName)
                   .replace(/{processedBy}/g, adminLastName)
                   .replace(/{month}/g, String(mon))
