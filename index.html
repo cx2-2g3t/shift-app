@@ -362,7 +362,7 @@
               })
               .catch(() => {});
           }
-        }, 600000);
+        }, 300000);
         return () => clearInterval(intervalId);
       }, []);
 
@@ -688,6 +688,41 @@
         setChangeForm({ isOpen: true, day: initialDay, status: currentShift.status === '未' ? '勤務' : currentShift.status, start: currentShift.start || DEFAULT_START_TIME, end: currentShift.end || DEFAULT_END_TIME, canWorkIfNeeded: currentShift.canWorkIfNeeded || false, note: currentShift.note || '', reason: '', changeCategory: '', confirmedBy: '' });
       };
 
+      const handleManualRefresh = () => {
+        setIsLoading(true); // 読み込み中のクルクルを表示
+        fetchGAS('getInitialData')
+          .then((data) => {
+            setDbUsers(data.users || []);
+            setChangeRequests(data.changeRequests || []);
+            setAdminNotifications(data.notifications || []);
+            
+            // 日次メモのデータ整理
+            const dailyNotesState = {};
+            (data.dailyNotes || []).forEach(row => {
+              const dKey = String(row.dateKey || '');
+              if (dKey.includes('-')) {
+                const parts = dKey.split('-');
+                if(parts.length >= 3) {
+                  const mStr = `${parts[0]}-${parts[1]}`;
+                  const d = parseInt(parts[2], 10);
+                  if (!dailyNotesState[mStr]) dailyNotesState[mStr] = {};
+                  dailyNotesState[mStr][d] = row.note;
+                }
+              }
+            });
+            setDailyNotes(dailyNotesState);
+            
+            setIsLoading(false);
+            // もし showToast 関数があれば通知を出す（なければこの行は消してOKです）
+            if (typeof showToast === 'function') showToast('最新のデータに更新しました', 'success');
+          })
+          .catch((err) => {
+            console.error(err);
+            setIsLoading(false);
+            alert('データの更新に失敗しました。');
+          });
+      };
+
       const submitChangeRequest = () => {
         if (!currentUser) return;
         if (!changeForm.confirmedBy) { showToast('事前確認管理者を選択してください', 'error'); return; }
@@ -712,9 +747,21 @@
 
         fetchGAS('saveRecord', 'changeRequests', 'id', newReq)
           .then(() => {
-            // Teamsへ通知
+            // ▼▼ 修正：時間の先頭の「0」を取り除く処理を追加 ▼▼
             const mon = parseInt(currentMonthStr.split('-')[1], 10);
-            fetchGAS('sendTeamsNotification', `🔔 **変更申請**\n${getDisplayName(currentUser.name)}さんから ${mon}月${changeForm.day}日 の変更申請が届きました。\n理由: ${changeForm.reason}`)
+            
+            // 時間の先頭の「0」を消す関数（09:00 → 9:00、18:00はそのまま）
+            const formatTime = (t) => t ? t.replace(/^0/, '') : '';
+            
+            // シフトの文字列表記を作成
+            const getShiftStr = (s) => s.status === '勤務' ? `${s.status} ${formatTime(s.start)}-${formatTime(s.end)}` : (s.status || '未');
+            const oldShift = getShiftStr(original);
+            const newShift = getShiftStr(newVal);
+
+            // アダプティブカードで確実に改行させるため「\n\n」を使用します
+            const notifyText = `🔔 **変更申請**\n\n${getDisplayName(currentUser.name)}さんから ${mon}月${changeForm.day}日 の変更申請が届きました。\n\n${oldShift} → ${newShift}\n\n理由: ${changeForm.reason}`;
+
+            fetchGAS('sendTeamsNotification', notifyText)
               .catch(e => console.error("Teams通知エラー:", e));
 
             setChangeRequests(prev => [newReq, ...prev]);
@@ -756,20 +803,47 @@
 
         const shiftRecord = { recordId: `${req.userId}_${targetMon}`, userId: req.userId, month: targetMon, status: (submissionStatus[targetMon] || {})[req.userId] || '提出済', shiftData: updatedShiftsForUser };
 
-        const daysStr = safeChanges.length > 0 ? safeChanges.map(c => c.day).join('日, ') + '日' : req.day + '日';
+        const dayOnlyStr = safeChanges.length > 0 ? safeChanges.map(c => c.day).join(', ') : req.day;
+        const daysStr = dayOnlyStr + '日';
+        
         const notifyRecord = { id: `note_${Date.now()}_${req.userId}`, userId: req.userId, type: 'staff_alert', message: `【承認】${parseInt(targetMon.split('-')[1], 10)}月${daysStr}のシフト変更申請が承認され、シフトの窓口に反映されました。`, read: false, createdAt: new Date().toLocaleString('ja-JP') };
 
         fetchGAS('saveRecord', 'changeRequests', 'id', updatedReq)
           .then(() => fetchGAS('saveRecord', 'shifts', 'recordId', shiftRecord))
           .then(() => fetchGAS('saveRecord', 'notifications', 'id', notifyRecord))
           .then(() => {
-            // ▼ 修正箇所：dbUsers に変更
             const staffUser = dbUsers.find(u => u.id === req.userId);
             const mon = parseInt(targetMon.split('-')[1], 10);
             if (staffUser && staffUser.email) {
-              const mailBody = `${getDisplayName(staffUser.name)}さん\n\nお疲れ様です。${getDisplayName(currentUser.name)}です。\n申請いただいた ${mon}月${daysStr} のシフト変更を承認し、シフト表に反映しました。\nよろしくお願いします。`;
-              fetchGAS('sendAppEmail', staffUser.email, `【承認】シフト変更申請の結果`, mailBody, currentUser.email, getDisplayName(currentUser.name))
-                .catch(e => console.error("メール送信エラー:", e));
+              
+              const staffLastName = getDisplayName(staffUser.name).split(/[ \u3000]+/)[0];
+              const adminLastName = getDisplayName(currentUser.name).split(/[ \u3000]+/)[0];
+              
+              // ▼▼ 修正：titleではなく、subject(件名)の中に「承認」があるかを探す ▼▼
+              const template = templates.find(t => t.subject && t.subject.includes('承認'));
+              
+              let subjectStr = `【承認】シフト変更申請の結果`;
+              let bodyStr = `${staffLastName}さん\n\nお疲れ様です。${adminLastName}です。\n申請いただいた ${mon}月${daysStr} のシフト変更を承認し、シフトの窓口に反映しました。\nよろしくお願いします。`;
+
+              if (template) {
+                subjectStr = (template.subject || subjectStr)
+                  .replace(/{userName}/g, staffLastName)
+                  .replace(/{processedBy}/g, adminLastName)
+                  .replace(/{month}/g, String(mon))
+                  .replace(/{day}/g, String(dayOnlyStr))
+                  .replace(/{reason}/g, req.reason || '');
+                  
+                bodyStr = (template.body || bodyStr)
+                  .replace(/{userName}/g, staffLastName)
+                  .replace(/{processedBy}/g, adminLastName)
+                  .replace(/{month}/g, String(mon))
+                  .replace(/{day}/g, String(dayOnlyStr))
+                  .replace(/{reason}/g, req.reason || '');
+              }
+
+              const subject = encodeURIComponent(subjectStr);
+              const body = encodeURIComponent(bodyStr);
+              window.location.href = `mailto:${staffUser.email}?subject=${subject}&body=${body}`;
             }
 
             setAdminNotifications(prev => [notifyRecord, ...prev]);
@@ -800,20 +874,47 @@
         const updatedReq = { ...req, status: 'rejected', processedBy: getDisplayName(currentUser.name) };
 
         const safeChanges = Array.isArray(req.changes) ? req.changes : [];
-        const daysStr = safeChanges.length > 0 ? safeChanges.map(c => c.day).join('日, ') + '日' : req.day + '日';
+        const dayOnlyStr = safeChanges.length > 0 ? safeChanges.map(c => c.day).join(', ') : req.day;
+        const daysStr = dayOnlyStr + '日';
+        
         const targetMon = req.targetMonth || activeTargetMonth;
         const notifyRecord = { id: `note_${Date.now()}_${req.userId}`, userId: req.userId, type: 'staff_alert', message: `【却下】${parseInt(targetMon.split('-')[1], 10)}月${daysStr}のシフト変更申請は、管理者により却下されました。`, read: false, createdAt: new Date().toLocaleString('ja-JP') };
 
         fetchGAS('saveRecord', 'changeRequests', 'id', updatedReq)
           .then(() => fetchGAS('saveRecord', 'notifications', 'id', notifyRecord))
           .then(() => {
-            // ▼ 修正箇所：dbUsers に変更
             const staffUser = dbUsers.find(u => u.id === req.userId);
             const mon = parseInt(targetMon.split('-')[1], 10);
             if (staffUser && staffUser.email) {
-              const mailBody = `${getDisplayName(staffUser.name)}さん\n\nお疲れ様です。${getDisplayName(currentUser.name)}です。\n申請いただいた ${mon}月${daysStr} のシフト変更ですが、今回はシフトの都合により却下となりました。\n詳細は直接またはチャット等でご相談ください。よろしくお願いします。`;
-              fetchGAS('sendAppEmail', staffUser.email, `【却下】シフト変更申請の結果`, mailBody, currentUser.email, getDisplayName(currentUser.name))
-                .catch(e => console.error("メール送信エラー:", e));
+              
+              const staffLastName = getDisplayName(staffUser.name).split(/[ \u3000]+/)[0];
+              const adminLastName = getDisplayName(currentUser.name).split(/[ \u3000]+/)[0];
+
+              // ▼▼ 修正：titleではなく、subject(件名)の中に「却下」があるかを探す ▼▼
+              const template = templates.find(t => t.subject && t.subject.includes('却下'));
+
+              let subjectStr = `【却下】シフト変更申請の結果`;
+              let bodyStr = `${staffLastName}さん\n\nお疲れ様です。${adminLastName}です。\n申請いただいた ${mon}月${daysStr} のシフト変更ですが、今回はシフトの都合により却下となりました。\n詳細は直接またはチャット等でご相談ください。よろしくお願いします。`;
+
+              if (template) {
+                subjectStr = (template.subject || subjectStr)
+                  .replace(/{userName}/g, staffLastName)
+                  .replace(/{processedBy}/g, adminLastName)
+                  .replace(/{month}/g, String(mon))
+                  .replace(/{day}/g, String(dayOnlyStr))
+                  .replace(/{reason}/g, req.reason || '');
+                  
+                bodyStr = (template.body || bodyStr)
+                  .replace(/{userName}/g, staffLastName)
+                  .replace(/{processedBy}/g, adminLastName)
+                  .replace(/{month}/g, String(mon))
+                  .replace(/{day}/g, String(dayOnlyStr))
+                  .replace(/{reason}/g, req.reason || '');
+              }
+
+              const subject = encodeURIComponent(subjectStr);
+              const body = encodeURIComponent(bodyStr);
+              window.location.href = `mailto:${staffUser.email}?subject=${subject}&body=${body}`;
             }
 
             setAdminNotifications(prev => [notifyRecord, ...prev]);
@@ -903,6 +1004,14 @@
 
       // ▼▼ スタッフ用の通知確認処理を追加 ▼▼
       const dismissStaffAlert = (id) => {
+        const note = adminNotifications.find(n => n.id === id); if(!note) return;
+        const updatedNote = { ...note, read: true };
+        setAdminNotifications(prev => prev.map(n => n.id === id ? updatedNote : n));
+        fetchGAS('saveRecord', 'notifications', 'id', updatedNote); 
+      };
+
+      // ▼▼ ここから追加：管理者用の通知を既読にする処理 ▼▼
+      const markNotificationAsRead = (id) => {
         const note = adminNotifications.find(n => n.id === id); if(!note) return;
         const updatedNote = { ...note, read: true };
         setAdminNotifications(prev => prev.map(n => n.id === id ? updatedNote : n));
@@ -1195,7 +1304,15 @@
                 </div>
               </div>
             </div>
+            
             <div className="flex items-center gap-2">
+              
+              {view === 'admin' && (
+                <button onClick={handleManualRefresh} className="p-2 rounded-md flex items-center gap-1.5 text-sm font-bold border bg-indigo-700 border-indigo-600 hover:bg-indigo-600 transition-colors cursor-pointer relative z-[100]">
+                  <Icon name="sync" size={14}/> <span className="hidden sm:inline">更新</span>
+                </button>
+              )}
+
               {currentUser?.role === 'admin' && (
                 <button onClick={() => setView(view === 'admin' ? 'staff' : 'admin')} className={`p-2 rounded-md flex items-center gap-1.5 text-sm font-bold border ${view === 'admin' ? 'bg-indigo-700 border-indigo-600 hover:bg-indigo-600' : 'bg-blue-500 border-blue-400 hover:bg-blue-400'} transition-colors cursor-pointer relative z-[100]`}>
                   <Icon name={view === 'admin' ? "user" : "user-tie"} size={14}/> <span className="hidden sm:inline">{view === 'admin' ? 'スタッフ画面へ' : '管理画面へ'}</span>
@@ -1686,8 +1803,18 @@
           {/* 管理者用コンテンツ */}
           {/* ==================================================== */}
           {view === 'admin' && (() => {
-            const adminNotes = adminNotifications.filter(n => n.type !== 'staff_alert'); // ←スタッフ用を除外
-            const unreadCount = adminNotes.filter(n => !n.read).length + pendingReqs.length;
+            
+            const adminNotes = adminNotifications.filter(n => {
+              // 1. スタッフ向けの通知（「【却下】」「【承認】」が含まれるもの等）は管理者画面には出さない
+              const isStaffAlert = n.type === 'staff_alert' || (n.message && (n.message.includes('【却下】') || n.message.includes('【承認】')));
+              if (isStaffAlert) return false;
+              
+              // 2. 処理済み（既読）のものは完全に隠す
+              if (n.read === true || String(n.read) === 'true') return false;
+              
+              return true; // 上の条件に当てはまらない、本当の管理者宛の未読通知だけ残す
+            });
+            const unreadCount = adminNotes.length + pendingReqs.length;
 
             return (
               <div className="flex-1 p-3 sm:p-5 max-w-[1400px] mx-auto w-full space-y-4 sm:space-y-6 mt-2 sm:mt-4">
@@ -2183,7 +2310,7 @@
                                 <tr key={req.id} className="hover:bg-gray-50">
                                   <td className="px-5 py-4 text-sm text-gray-500">{safeDate}</td>
                                   <td className="px-5 py-4 font-bold text-gray-800"><Icon name="user" className="mr-2 text-gray-400"/>{req.userName}</td>
-                                  <td className="px-5 py-4 font-bold text-indigo-600 text-lg text-center">{req.targetMonth ? `${parseInt(req.targetMonth.split('-')[1], 10)}/` : ''}{req.day}日</td>
+                                  <td className="px-5 py-4 font-bold text-indigo-600 text-lg text-center">{req.targetMonth ? `${parseInt(req.targetMonth.split('-')[1], 10)}/` : ''}{req.day}</td>
                                   <td className="px-5 py-4 text-center"><span className="bg-gray-100 border text-gray-700 px-3 py-1 text-sm font-bold">{req.newVal?.changeCategory || '-'}</span></td>
                                   <td className="px-5 py-4 text-center"><span className="bg-indigo-50 border text-indigo-700 px-3 py-1 text-sm font-bold">{req.newVal?.attendanceStatus || '-'}</span></td>
                                   <td className="px-5 py-4 align-top"><span className="text-gray-400 line-through bg-gray-50 border px-3 py-1.5 text-sm block w-fit mx-auto">{formatShiftStr(req.oldVal)}</span></td>
@@ -2333,28 +2460,52 @@
 
                 {/* 4. 設定・テンプレタブ */}
                 {adminTab === 'settings' && (
-                  <div className="max-w-5xl mx-auto space-y-6 animate-fade-in">
+                  <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
                     <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
                       <div className="bg-indigo-50 px-5 py-4 border-b flex justify-between items-center">
                         <div><h2 className="text-indigo-900 font-bold flex gap-2 text-lg"><Icon name="envelope" /> メールテンプレート設定</h2></div>
                         <button onClick={() => openTemplateForm(null)} className="bg-indigo-600 text-white px-4 py-2 font-bold rounded-md flex gap-2"><Icon name="plus" /> 新規追加</button>
                       </div>
-                      <div className="p-5 bg-gray-50">
-                        <div className="mb-4 bg-white rounded-md border p-3 text-sm text-gray-600 flex gap-2"><Icon name="info-circle" className="text-blue-500 mt-0.5" /><p>本文に <code className="bg-gray-100 text-red-600 font-bold">{`{month}`}</code> で月、<code className="bg-gray-100 text-red-600 font-bold">{`{deadline}`}</code> で締切日を自動挿入。</p></div>
-                        <div className="grid gap-4 md:grid-cols-2">
-                          {emailTemplates.map(tpl => (
-                            <div key={tpl.id} className="bg-white rounded-md border p-4 flex flex-col h-full group relative">
-                              <div className="flex justify-between items-start mb-3 border-b pb-2">
-                                <h3 className="font-bold text-lg text-gray-800 pr-16">{generateMailText(tpl.name)}</h3>
-                                <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button onClick={() => openTemplateForm(tpl)} className="bg-gray-100 text-gray-600 p-2 rounded-md"><Icon name="pen" /></button>
-                                  <button onClick={() => deleteTemplate(tpl.id)} className="bg-red-50 text-red-600 p-2 rounded-md"><Icon name="trash" /></button>
+                      
+                      {/* ▼ ここから横並びレイアウトに変更 ▼ */}
+                      <div className="p-5 bg-gray-50 flex flex-col lg:flex-row gap-6 items-start">
+                        
+                        {/* 左側：テンプレート一覧 */}
+                        <div className="flex-1 w-full">
+                          <div className="grid gap-4 md:grid-cols-2">
+                            {emailTemplates.map(tpl => (
+                              <div key={tpl.id} className="bg-white rounded-md border p-4 flex flex-col h-full group relative">
+                                <div className="flex justify-between items-start mb-3 border-b pb-2">
+                                  <h3 className="font-bold text-lg text-gray-800 pr-16">{generateMailText(tpl.name)}</h3>
+                                  <div className="absolute top-3 right-3 flex gap-1">
+                                    <button onClick={() => openTemplateForm(tpl)} className="bg-gray-100 text-gray-600 p-2 rounded-md"><Icon name="pen" /></button>
+                                    <button onClick={() => deleteTemplate(tpl.id)} className="bg-red-50 text-red-600 p-2 rounded-md"><Icon name="trash" /></button>
+                                  </div>
                                 </div>
+                                <div className="text-sm text-gray-600 whitespace-pre-wrap flex-1">{renderTextWithLink(generateMailText(tpl.body))}</div>
                               </div>
-                              <div className="text-sm text-gray-600 whitespace-pre-wrap flex-1">{renderTextWithLink(generateMailText(tpl.body))}</div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
+
+                        {/* 右側：タグの説明文（スクロールしても追従します） */}
+                        <div className="w-full lg:w-[380px] shrink-0 sticky top-5">
+                          <div className="bg-white rounded-md border p-4 text-sm text-gray-600 flex gap-3 shadow-sm">
+                            <Icon name="info-circle" className="text-blue-500 mt-0.5 shrink-0" />
+                            <div>
+                              <p className="mb-2 font-bold text-gray-700">件名や本文に以下のタグを含めると、自動的に内容が置き換わります。</p>
+                              <ul className="space-y-1.5">
+                                <li><code className="bg-gray-100 text-red-600 font-bold px-1.5 py-0.5 rounded mr-1">{`{month}`}</code> 対象月（例：4）</li>
+                                <li><code className="bg-gray-100 text-red-600 font-bold px-1.5 py-0.5 rounded mr-1">{`{deadline}`}</code> 締切日 <span className="text-xs text-gray-400 ml-1">※シフト提出依頼用</span></li>
+                                <li><code className="bg-gray-100 text-red-600 font-bold px-1.5 py-0.5 rounded mr-1">{`{userName}`}</code> 申請スタッフの苗字 <span className="text-xs text-gray-400 ml-1">※変更申請用</span></li>
+                                <li><code className="bg-gray-100 text-red-600 font-bold px-1.5 py-0.5 rounded mr-1">{`{processedBy}`}</code> 対応管理者の苗字 <span className="text-xs text-gray-400 ml-1">※変更申請用</span></li>
+                                <li><code className="bg-gray-100 text-red-600 font-bold px-1.5 py-0.5 rounded mr-1">{`{day}`}</code> 対象日（例：1） <span className="text-xs text-gray-400 ml-1">※変更申請用</span></li>
+                                <li><code className="bg-gray-100 text-red-600 font-bold px-1.5 py-0.5 rounded mr-1">{`{reason}`}</code> 申請理由 <span className="text-xs text-gray-400 ml-1">※変更申請用</span></li>
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+
                       </div>
                     </div>
                   </div>
@@ -2785,7 +2936,6 @@
                           <p className="text-xs text-gray-500 mt-3 border-t pt-2">※ すでにシフトを入力済みの日は選択できません。</p>
                         </div>
                       )}
-                      {/* ▲▲ ここまで追加 ▲▲ */}
                     </div>
                   )}
                 </div>
