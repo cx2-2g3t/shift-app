@@ -2297,13 +2297,31 @@
                         </thead>
                         <tbody className="divide-y">
                           {(() => {
-                            const currentMonthHistory = changeRequests.filter(req => req.targetMonth === currentMonthStr);
+                            const historyList = changeRequests
+                              .filter(req => {
+                                // 1. targetMonth（2026-04等）を取得し、形式を統一
+                                let reqMonth = req.targetMonth ? String(req.targetMonth).replace(/\//g, '-') : '';
+                                
+                                // 2. もしtargetMonthが空なら、作成日時（createdAt）から判定を試みる（予備用）
+                                if (!reqMonth && req.createdAt) {
+                                  reqMonth = String(req.createdAt).substring(0, 7).replace(/\//g, '-');
+                                }
+                                
+                                // 今表示しているカレンダーの月と一致するものだけを返す
+                                return reqMonth === currentMonthStr;
+                              })
+                              .sort((a, b) => {
+                                // 最新の申請が一番上にくるように並び替え
+                                const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0);
+                                const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0);
+                                return dateB - dateA;
+                              });
                             
-                            if (currentMonthHistory.length === 0) {
-                              return <tr><td colSpan="10" className="p-10 text-center text-gray-500 font-bold">履歴はありません</td></tr>;
+                            if (historyList.length === 0) {
+                              return <tr><td colSpan="10" className="p-10 text-center text-gray-500 font-bold">{currentMonth}月の履歴はありません</td></tr>;
                             }
                             
-                            return currentMonthHistory.map(req => {
+                            return historyList.map(req => {
                               const safeChanges = Array.isArray(req.changes) ? req.changes : [];
                               const safeDate = req.createdAt ? String(req.createdAt).split(' ')[0] : '';
                               return (
@@ -2323,8 +2341,8 @@
                                   </td>
                                   <td className="px-5 py-4 text-sm font-bold text-gray-700">{req.processedBy || '-'}</td>
                                 </tr>
-                              )
-                            })
+                              );
+                            });
                           })()}
                         </tbody>
                       </table>
