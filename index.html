@@ -608,16 +608,12 @@
         setIsLoading(true);
         const statusToSave = isSubmit ? '提出済' : '途中保存';
         
-        // 既存のシフトデータをコピー
         const currentShifts = activeMonthShifts[currentUser.id] || {};
         let shiftsToSave = { ...currentShifts };
         
-        // 未入力の日があれば一括で「休」を設定する
         if (unenteredDays.length > 0) {
           unenteredDays.forEach(day => {
-            // adjustableDays（選択された日）に含まれているかチェック
             const canWork = adjustableDays.includes(day);
-            // 元のデータが「未」または存在しない場合のみ上書き
             if (!currentShifts[day] || currentShifts[day].status === '未') {
               shiftsToSave[day] = { status: '休', start: DEFAULT_START_TIME, end: DEFAULT_END_TIME, canWorkIfNeeded: canWork, note: '' };
             }
@@ -628,20 +624,23 @@
 
         fetchGAS('saveRecord', 'shifts', 'recordId', record)
           .then(() => {
+            // Teamsへ通知（エラー時は裏側でログを出す）
             if (isSubmit) {
-              fetchGAS('sendTeamsNotification', `✅ **シフト提出**\n${getDisplayName(currentUser.name)}さんから ${activeTargetMonth.split('-')[1]}月 分のシフトが提出されました。`);
+              fetchGAS('sendTeamsNotification', `✅ **シフト提出**\n${getDisplayName(currentUser.name)}さんから ${activeTargetMonth.split('-')[1]}月 分のシフトが提出されました。`)
+                .catch(e => console.error("Teams通知エラー:", e));
             }
 
             if (unenteredDays.length > 0) {
-              setShifts(prev => ({
-                ...prev, [activeTargetMonth]: { ...(prev[activeTargetMonth] || {}), [currentUser.id]: shiftsToSave }
-              }));
+              setShifts(prev => ({ ...prev, [activeTargetMonth]: { ...(prev[activeTargetMonth] || {}), [currentUser.id]: shiftsToSave } }));
             }
             setSubmissionStatus(prev => ({ ...prev, [activeTargetMonth]: { ...(prev[activeTargetMonth] || {}), [currentUser.id]: statusToSave } }));
             setConfirmModal({ isOpen: true, title: '処理完了', message: isSubmit ? 'シフトの提出が完了しました。' : 'シフトを一時保存しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
+          .catch((err) => { 
+            alert('保存エラーが発生しました。\n詳細: ' + err.message); 
+            setIsLoading(false); 
+          });
       };
 
       const handleSubmitShift = (isSubmit = false) => {
@@ -713,22 +712,21 @@
 
         fetchGAS('saveRecord', 'changeRequests', 'id', newReq)
           .then(() => {
+            // Teamsへ通知
             const mon = parseInt(currentMonthStr.split('-')[1], 10);
-            fetchGAS('sendTeamsNotification', `🔔 **変更申請**\n${getDisplayName(currentUser.name)}さんから ${mon}月${changeForm.day}日 の変更申請が届きました。\n理由: ${changeForm.reason}`);
+            fetchGAS('sendTeamsNotification', `🔔 **変更申請**\n${getDisplayName(currentUser.name)}さんから ${mon}月${changeForm.day}日 の変更申請が届きました。\n理由: ${changeForm.reason}`)
+              .catch(e => console.error("Teams通知エラー:", e));
 
             setChangeRequests(prev => [newReq, ...prev]);
-            setPendingChanges(prev => ({
-              ...prev,
-              [currentUser.id]: {
-                ...(prev[currentUser.id] || {}),
-                [changeForm.day]: true
-              }
-            }));
+            setPendingChanges(prev => ({ ...prev, [currentUser.id]: { ...(prev[currentUser.id] || {}), [changeForm.day]: true } }));
             setChangeForm(prev => ({ ...prev, isOpen: false }));
             setConfirmModal({ isOpen: true, title: '申請完了', message: '申請を送信しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
+          .catch((err) => { 
+            alert('申請エラーが発生しました。\n詳細: ' + err.message); 
+            setIsLoading(false); 
+          });
       };
 
       const handleApprove = (reqId) => {
@@ -758,7 +756,6 @@
 
         const shiftRecord = { recordId: `${req.userId}_${targetMon}`, userId: req.userId, month: targetMon, status: (submissionStatus[targetMon] || {})[req.userId] || '提出済', shiftData: updatedShiftsForUser };
 
-        // ▼▼ スタッフ向けの通知データを作成 ▼▼
         const daysStr = safeChanges.length > 0 ? safeChanges.map(c => c.day).join('日, ') + '日' : req.day + '日';
         const notifyRecord = { id: `note_${Date.now()}_${req.userId}`, userId: req.userId, type: 'staff_alert', message: `【承認】${parseInt(targetMon.split('-')[1], 10)}月${daysStr}のシフト変更申請が承認され、シフトの窓口に反映されました。`, read: false, createdAt: new Date().toLocaleString('ja-JP') };
 
@@ -766,12 +763,13 @@
           .then(() => fetchGAS('saveRecord', 'shifts', 'recordId', shiftRecord))
           .then(() => fetchGAS('saveRecord', 'notifications', 'id', notifyRecord))
           .then(() => {
-            // ▼▼ 追加：スタッフへ結果メールを送信（処理した管理者の情報を付与） ▼▼
-            const staffUser = users.find(u => u.id === req.userId);
+            // ▼ 修正箇所：dbUsers に変更
+            const staffUser = dbUsers.find(u => u.id === req.userId);
             const mon = parseInt(targetMon.split('-')[1], 10);
             if (staffUser && staffUser.email) {
-              const mailBody = `${getDisplayName(staffUser.name)}さん\n\nお疲れ様です。${getDisplayName(currentUser.name)}です。\n申請いただいた ${mon}月${daysStr} のシフト変更を承認し、シフトの窓口に反映しました。\nよろしくお願いします。`;
-              fetchGAS('sendAppEmail', staffUser.email, `【承認】シフト変更申請の結果`, mailBody, currentUser.email, getDisplayName(currentUser.name));
+              const mailBody = `${getDisplayName(staffUser.name)}さん\n\nお疲れ様です。${getDisplayName(currentUser.name)}です。\n申請いただいた ${mon}月${daysStr} のシフト変更を承認し、シフト表に反映しました。\nよろしくお願いします。`;
+              fetchGAS('sendAppEmail', staffUser.email, `【承認】シフト変更申請の結果`, mailBody, currentUser.email, getDisplayName(currentUser.name))
+                .catch(e => console.error("メール送信エラー:", e));
             }
 
             setAdminNotifications(prev => [notifyRecord, ...prev]);
@@ -779,11 +777,7 @@
 
             setPendingChanges(prev => { 
               const uPending = { ...(prev[req.userId] || {}) }; 
-              if (safeChanges.length > 0) {
-                updatedReq.changes.forEach(c => delete uPending[c.day]); 
-              } else if (req.day) {
-                delete uPending[req.day];
-              }
+              if (safeChanges.length > 0) { updatedReq.changes.forEach(c => delete uPending[c.day]); } else if (req.day) { delete uPending[req.day]; }
               return { ...prev, [req.userId]: uPending }; 
             });
             setChangeRequests(prev => prev.map(r => r.id === reqId ? updatedReq : r));
@@ -793,7 +787,10 @@
             setConfirmModal({ isOpen: true, title: '処理完了', message: '承認し、反映しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
+          .catch((err) => { 
+            alert('承認エラーが発生しました。\n詳細: ' + err.message); 
+            setIsLoading(false); 
+          });
       };
 
       const handleReject = (reqId) => {
@@ -802,7 +799,6 @@
         if (!req) { setIsLoading(false); return; }
         const updatedReq = { ...req, status: 'rejected', processedBy: getDisplayName(currentUser.name) };
 
-        // ▼▼ スタッフ向けの通知データを作成 ▼▼
         const safeChanges = Array.isArray(req.changes) ? req.changes : [];
         const daysStr = safeChanges.length > 0 ? safeChanges.map(c => c.day).join('日, ') + '日' : req.day + '日';
         const targetMon = req.targetMonth || activeTargetMonth;
@@ -811,22 +807,19 @@
         fetchGAS('saveRecord', 'changeRequests', 'id', updatedReq)
           .then(() => fetchGAS('saveRecord', 'notifications', 'id', notifyRecord))
           .then(() => {
-            // ▼▼ 追加：スタッフへ結果メールを送信（処理した管理者の情報を付与） ▼▼
-            const staffUser = users.find(u => u.id === req.userId);
+            // ▼ 修正箇所：dbUsers に変更
+            const staffUser = dbUsers.find(u => u.id === req.userId);
             const mon = parseInt(targetMon.split('-')[1], 10);
             if (staffUser && staffUser.email) {
-              const mailBody = `${getDisplayName(staffUser.name)}さん\n\nお疲れ様です。${getDisplayName(currentUser.name)}です。\n申請いただいた ${mon}月${daysStr} のシフト変更ですが、今回はシフトの都合により却下となりました。\n詳細は直接またはメールでご相談ください。よろしくお願いします。`;
-              fetchGAS('sendAppEmail', staffUser.email, `【却下】シフト変更申請の結果`, mailBody, currentUser.email, getDisplayName(currentUser.name));
+              const mailBody = `${getDisplayName(staffUser.name)}さん\n\nお疲れ様です。${getDisplayName(currentUser.name)}です。\n申請いただいた ${mon}月${daysStr} のシフト変更ですが、今回はシフトの都合により却下となりました。\n詳細は直接またはチャット等でご相談ください。よろしくお願いします。`;
+              fetchGAS('sendAppEmail', staffUser.email, `【却下】シフト変更申請の結果`, mailBody, currentUser.email, getDisplayName(currentUser.name))
+                .catch(e => console.error("メール送信エラー:", e));
             }
 
             setAdminNotifications(prev => [notifyRecord, ...prev]);
             setPendingChanges(prev => {
               const uPending = { ...(prev[req.userId] || {}) }; 
-              if (safeChanges.length > 0) {
-                safeChanges.forEach(c => delete uPending[c.day]); 
-              } else if (req.day) {
-                delete uPending[req.day];
-              }
+              if (safeChanges.length > 0) { safeChanges.forEach(c => delete uPending[c.day]); } else if (req.day) { delete uPending[req.day]; }
               return { ...prev, [req.userId]: uPending }; 
             });
             setChangeRequests(prev => prev.map(r => r.id === reqId ? updatedReq : r));
@@ -836,7 +829,10 @@
             setConfirmModal({ isOpen: true, title: '処理完了', message: '却下しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
-          .catch(() => { alert('システムとの接続に失敗しました。'); setIsLoading(false); });
+          .catch((err) => { 
+            alert('却下エラーが発生しました。\n詳細: ' + err.message); 
+            setIsLoading(false); 
+          });
       };
 
       const toggleApprovalCheck = (reqId, type) => { setApprovalChecks(prev => { const current = prev[reqId] || { shift: false, kot: false }; return { ...prev, [reqId]: { ...current, [type]: !current[type] } }; }); };
