@@ -343,6 +343,16 @@
             fetchGAS('getInitialData')
               .then((data) => {
                 setDbUsers(data.users || []);
+                
+                const settings = data.settings || [];
+                const staffOrderObj = settings.find(s => s.key === 'staffOrder');
+                if (staffOrderObj) {
+                  try { 
+                    const parsed = JSON.parse(staffOrderObj.value);
+                    setStaffOrder(Array.isArray(parsed) ? parsed : []); 
+                  } catch(e){}
+                }
+
                 setChangeRequests(data.changeRequests || []);
                 setAdminNotifications(data.notifications || []);
                 const dailyNotesState = {};
@@ -362,7 +372,7 @@
               })
               .catch(() => {});
           }
-        }, 300000);
+        }, 300000); // 間隔はお好みで
         return () => clearInterval(intervalId);
       }, []);
 
@@ -689,14 +699,28 @@
       };
 
       const handleManualRefresh = () => {
-        setIsLoading(true); // 読み込み中のクルクルを表示
+        setIsLoading(true);
         fetchGAS('getInitialData')
           .then((data) => {
+            // スタッフ情報の更新
             setDbUsers(data.users || []);
+            
+            const settings = data.settings || [];
+            const staffOrderObj = settings.find(s => s.key === 'staffOrder');
+            if (staffOrderObj) {
+              try { 
+                const parsed = JSON.parse(staffOrderObj.value);
+                setStaffOrder(Array.isArray(parsed) ? parsed : []); 
+              } catch(e){ setStaffOrder([]); }
+            }
+            const deadlineObj = settings.find(s => s.key === 'deadline');
+            if (deadlineObj) setDeadline(deadlineObj.value);
+            const isConfirmedObj = settings.find(s => s.key === 'isConfirmed');
+            if (isConfirmedObj) setIsConfirmed(isConfirmedObj.value === 'true');
+
             setChangeRequests(data.changeRequests || []);
             setAdminNotifications(data.notifications || []);
             
-            // 日次メモのデータ整理
             const dailyNotesState = {};
             (data.dailyNotes || []).forEach(row => {
               const dKey = String(row.dateKey || '');
@@ -711,9 +735,7 @@
               }
             });
             setDailyNotes(dailyNotesState);
-            
             setIsLoading(false);
-            // もし showToast 関数があれば通知を出す（なければこの行は消してOKです）
             if (typeof showToast === 'function') showToast('最新のデータに更新しました', 'success');
           })
           .catch((err) => {
