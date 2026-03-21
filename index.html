@@ -12,6 +12,7 @@
   <script src="https://unpkg.com/mobile-drag-drop/index.min.js"></script>
   <script src="https://unpkg.com/mobile-drag-drop/scroll-behaviour.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/mobile-drag-drop/default.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script>
     window.addEventListener('DOMContentLoaded', () => {
       MobileDragDrop.polyfill({ dragImageTranslateOverride: MobileDragDrop.scrollBehaviourDragImageTranslateOverride });
@@ -642,7 +643,8 @@
           .then(() => {
             // Teamsへ通知（エラー時は裏側でログを出す）
             if (isSubmit) {
-              const monthNum = parseInt(activeTargetMonth.split('-')[1], 10);
+              // ▼ 修正：月を数字(4など)にし、名前のスペースはそのまま残す
+              const monthNum = Number(activeTargetMonth.split('-')[1]);
               
               fetchGAS('sendTeamsNotification', `✅ **シフト提出**\n${getDisplayName(currentUser.name)}さんから${monthNum}月分のシフトが提出されました。`)
                 .catch(e => console.error("Teams通知エラー:", e));
@@ -778,7 +780,8 @@
         fetchGAS('saveRecord', 'changeRequests', 'id', newReq)
           .then(() => {
             // ▼▼ 修正：時間の先頭の「0」を取り除く処理を追加 ▼▼
-            const mon = parseInt(currentMonthStr.split('-')[1], 10);
+            // ▼▼ 修正：時間の先頭の「0」を取り除く処理を追加 ▼▼
+            const mon = Number(currentMonthStr.split('-')[1]);
             
             // 時間の先頭の「0」を消す関数（09:00 → 9:00、18:00はそのまま）
             const formatTime = (t) => t ? t.replace(/^0/, '') : '';
@@ -789,7 +792,7 @@
             const newShift = getShiftStr(newVal);
 
             // アダプティブカードで確実に改行させるため「\n\n」を使用します
-            const notifyText = `🔔 **変更申請**\n\n${getDisplayName(currentUser.name)}さんから ${mon}月${changeForm.day}日 の変更申請が届きました。\n\n${oldShift} → ${newShift}\n\n理由: ${changeForm.reason}`;
+            const notifyText = `🔔 **変更申請**\n\n${getDisplayName(currentUser.name)}さんから${mon}月${changeForm.day}日の変更申請が届きました。\n\n${oldShift} → ${newShift}\n\n理由: ${changeForm.reason}`;
 
             fetchGAS('sendTeamsNotification', notifyText)
               .catch(e => console.error("Teams通知エラー:", e));
@@ -1105,35 +1108,70 @@
         }});
       };
 
-      const handleExportCSV = () => {
-        // ▼ 修正1：ヘッダー（1行目）の「名前」と「雇用区分」の間に「役職」を追加
-        let csv = "社員番号,名前,役割,雇用区分,日付,ステータス,出勤,退勤,調整可能,備考,月間コメント\n";
+      // ▼ CSV出力をExcel（.xlsx）出力に変更
+      const handleExportExcel = () => {
+        setIsLoading(true);
         
+        // 1. 出力するデータ（表の形）を作成
+        const exportData = [];
+        
+        // ヘッダー（1行目）を追加
+        exportData.push(["社員番号", "名前", "役割", "雇用区分", "日付", "ステータス", "出勤", "退勤", "調整可能", "備考", "月間コメント"]);
+        
+        // データ行を追加
         staffUsers.filter(u => u.status === 'active').forEach(u => {
-          const mNote = (currentMonthShifts[u.id]?.monthlyNote || '').replace(/"/g, '""');
-          const mNoteCsv = `"${mNote}"`;
+          const mNote = currentMonthShifts[u.id]?.monthlyNote || '';
           daysArray.forEach(d => {
             const s = currentMonthShifts[u.id]?.[d] || { status: '未' };
-            const dNote = (s.note || '').replace(/"/g, '""');
-            const dNoteCsv = `"${dNote}"`;
+            const dNote = s.note || '';
             
             // 勤務、または「休（調整可）」の時に時間を出力する
             const shouldOutputTime = s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded);
             const outStart = shouldOutputTime ? (s.start || '') : '';
             const outEnd = shouldOutputTime ? (s.end || '') : '';
-            
-            // 調整可能にチェックが入っていれば「〇」を出力
             const isAdjustable = s.canWorkIfNeeded ? '〇' : '';
             
-            // ▼ 修正2：データ行に "${u.position || ''}" を追加
-            csv += `${u.employeeId},"${getDisplayName(u.name)}","${u.position || ''}","${u.employmentCategory||''}",${currentMonth}/${d},${s.status},${outStart},${outEnd},${isAdjustable},${dNoteCsv},${mNoteCsv}\n`;
+            exportData.push([
+              u.employeeId,
+              getDisplayName(u.name),
+              u.position || '',
+              u.employmentCategory || '',
+              `${currentMonth}/${d}`,
+              s.status,
+              outStart,
+              outEnd,
+              isAdjustable,
+              dNote,
+              mNote
+            ]);
           });
         });
-        const link = document.createElement("a");
-        const bom = new Uint8Array([0xEF, 0xBB, 0xBF]); 
-        const blob = new Blob([bom, csv], { type: 'text/csv' });
-        link.href = URL.createObjectURL(blob);
-        link.download = `シフト_${currentYear}年${currentMonth}月.csv`; link.click(); showToast('ダウンロードしました');
+
+        // 2. SheetJSを使ってExcelファイルを作成
+        const wb = XLSX.utils.book_new(); // 新しいワークブック
+        const ws = XLSX.utils.aoa_to_sheet(exportData); // 配列からシートを作成
+        
+        // （おまけ）Excelの列幅を見やすく自動調整
+        ws['!cols'] = [
+          { wch: 10 }, // 社員番号
+          { wch: 15 }, // 名前
+          { wch: 10 }, // 役割
+          { wch: 12 }, // 雇用区分
+          { wch: 8 },  // 日付
+          { wch: 10 }, // ステータス
+          { wch: 8 },  // 出勤
+          { wch: 8 },  // 退勤
+          { wch: 10 }, // 調整可能
+          { wch: 25 }, // 備考
+          { wch: 35 }  // 月間コメント
+        ];
+
+        XLSX.utils.book_append_sheet(wb, ws, "シフトデータ"); // シートを追加
+        
+        // 3. ダウンロード実行
+        XLSX.writeFile(wb, `シフト_${currentYear}年${currentMonth}月.xlsx`);
+        setIsLoading(false);
+        showToast('Excelファイルをダウンロードしました');
       };
 
       const openMailForm = () => {
@@ -2006,7 +2044,7 @@
                         </div>
                         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
 
-<button onClick={handleExportCSV} className="hidden sm:flex bg-emerald-600 rounded-md hover:bg-emerald-700 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-excel" /> Excel出力 (CSV)</button>
+<button onClick={handleExportExcel} className="hidden sm:flex bg-emerald-600 rounded-md hover:bg-emerald-700 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-excel" /> Excel出力</button>
                           <div className="flex flex-nowrap bg-gray-100 rounded-md p-1.5 border w-full sm:w-auto overflow-x-auto no-scrollbar shrink-0">
                             <button onClick={() => setShiftViewMode('month')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'month' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="th" /> 月間</button>
                             <button onClick={() => setShiftViewMode('day')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'day' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="align-left" /> 日別</button>
