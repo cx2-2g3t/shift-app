@@ -13,6 +13,7 @@
   <script src="https://unpkg.com/mobile-drag-drop/scroll-behaviour.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/mobile-drag-drop/default.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
   <script>
     window.addEventListener('DOMContentLoaded', () => {
       MobileDragDrop.polyfill({ dragImageTranslateOverride: MobileDragDrop.scrollBehaviourDragImageTranslateOverride });
@@ -33,13 +34,13 @@
     .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
 
     .tooltip-container { position: relative; display: inline-flex; align-items: center; outline: none; }
-    .tooltip-container:hover { z-index: 99999; }
+    .tooltip-container:hover { z-index: 9999999 !important; }
     .tooltip-text { 
       visibility: hidden; position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%);
       margin-bottom: 8px; background-color: #1e293b; color: white; text-align: left; 
       padding: 8px 12px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; width: max-content;
       max-width: 150px; font-size: 11px; font-weight: bold; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
-      opacity: 0; transition: opacity 0.2s, visibility 0.2s; pointer-events: none; z-index: 99999;
+      opacity: 0; transition: opacity 0.2s, visibility 0.2s; pointer-events: none; z-index: 999999 !important;
     }
     .tooltip-container:hover .tooltip-text, .tooltip-container:active .tooltip-text, .tooltip-container:focus-within .tooltip-text { visibility: visible; opacity: 1; }
     .tooltip-text::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px; border-width: 6px; border-style: solid; border-color: #1e293b transparent transparent transparent; }
@@ -1174,6 +1175,257 @@
         showToast('Excelファイルをダウンロードしました');
       };
 
+      const handleExportForVBA = () => {
+        setIsLoading(true);
+        
+        const timeToDecimal = (timeStr) => {
+          if (!timeStr) return "";
+          const [h, m] = timeStr.split(':').map(Number);
+          if (isNaN(h) || isNaN(m)) return "";
+          return h + (m / 60);
+        };
+
+        const exportData = [];
+        // ヘッダー：社員番号、名前、日付、出勤、退勤のみ
+        exportData.push(["社員番号", "スタッフ名", "日付", "出勤時間", "退勤時間"]);
+        
+        staffUsers.filter(u => u.status === 'active').forEach(u => {
+          const empId = u.employeeId || "";
+          const name = getDisplayName(u.name);
+          
+          daysArray.forEach(day => {
+            const s = currentMonthShifts[u.id]?.[day];
+            let startVal = "";
+            let endVal = "";
+            
+            // 勤務の場合のみ時間を計算する
+            if (s && s.status === '勤務') {
+              startVal = timeToDecimal(s.start);
+              endVal = timeToDecimal(s.end);
+            }
+            
+            // メモを除外して、5列分だけのデータを作成する
+            exportData.push([empId, name, day, startVal, endVal]);
+          });
+        });
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(exportData);
+        
+        // 列幅の調整（5列分に最適化）
+        ws['!cols'] = [
+          { wch: 12 }, // 社員番号
+          { wch: 15 }, // スタッフ名
+          { wch: 8 },  // 日付
+          { wch: 10 }, // 出勤時間
+          { wch: 10 }  // 退勤時間
+        ];
+
+        XLSX.utils.book_append_sheet(wb, ws, "VBA転記用");
+        XLSX.writeFile(wb, `VBA転記データ_${currentYear}年${currentMonth}月.xlsx`);
+        setIsLoading(false);
+        showToast('VBA転記用ファイルをダウンロードしました');
+      };
+
+      const hourCodeMap = { 0:"Q", 1:"R", 2:"S", 3:"T", 4:"U", 5:"V", 6:"W", 7:"X", 8:"A", 9:"B", 10:"C", 11:"D", 12:"E", 13:"F", 14:"G", 15:"H", 16:"I", 17:"J", 18:"K", 19:"L", 20:"M", 21:"N", 22:"O", 23:"P" };
+      const roleRules = {
+        "管理者": { earlyMinutes: 15, shortBreak: 15, longBreak: 75 },
+        "オペレーター": { earlyMinutes: 10, shortBreak: 10, longBreak: 70 },
+        "社員": { earlyMinutes: 0, shortBreak: 0, longBreak: 60 }
+      };
+
+      const pad2 = (n) => String(n).padStart(2, "0");
+      const minutesToHHMM = (totalMinutes) => {
+        const normalized = ((totalMinutes % (24 * 60)) + (24 * 60)) % (24 * 60);
+        const h = Math.floor(normalized / 60);
+        const m = normalized % 60;
+        return { hour: h, minute: m, hhmm: pad2(h) + pad2(m) };
+      };
+      
+      const parseTimeToMinutes = (value) => {
+        if (!value) return null;
+        const m = String(value).trim().match(/^(\d{1,2}):(\d{2})$/);
+        if (!m) return null;
+        return Number(m[1]) * 60 + Number(m[2]);
+      };
+
+      // 1. 区分（社員 / 管理者 / オペレーター）の判定
+      const determineRole = (user) => {
+        const empCat = user.employmentCategory || '';
+        const pos = user.position || '';
+        if (empCat === '社員') return '社員';
+        if (pos === 'LD' || pos === 'TR') return '管理者';
+        if (pos === 'CM') return 'オペレーター';
+        return 'オペレーター'; // デフォルト
+      };
+
+      // 2. パターンコードの計算
+      const calcPatternCode = (role, status, baseStart, baseEnd, employeeCode) => {
+        if (status === "休み" || status === "有休") return "";
+        const rule = roleRules[role];
+        if (!rule) return "";
+        let startMin = parseTimeToMinutes(baseStart);
+        let endMin = parseTimeToMinutes(baseEnd);
+        if (startMin == null || endMin == null) return "";
+        
+        const baseWorkMinutes = endMin - startMin;
+        if (baseWorkMinutes <= 0) return "";
+
+        // 特定社員（20120049）の特別ルール
+        const isSpecial1016 = String(employeeCode).trim() === "20120049" && startMin === 10 * 60 && endMin === 16 * 60;
+
+        let actualStart = startMin - rule.earlyMinutes;
+        let actualEnd = endMin;
+        let breakMin = 0;
+
+        if (isSpecial1016) {
+          if (role === "管理者") {
+            actualStart = 9 * 60 + 45;
+            actualEnd = 15 * 60 + 45;
+            breakMin = 15; 
+          } else if (role === "オペレーター") {
+            actualStart = 9 * 60 + 50;
+            actualEnd = 15 * 60 + 45;
+            breakMin = 10;
+          } else if (role === "社員") {
+            actualStart = 10 * 60;
+            actualEnd = 15 * 60 + 45;
+            breakMin = 60;
+          }
+        } else {
+          const workHours = baseWorkMinutes / 60;
+          if (workHours === 2) {
+            breakMin = 0;
+          } else if (workHours >= 6) {
+            breakMin = rule.longBreak;
+          } else {
+            breakMin = rule.shortBreak;
+          }
+        }
+
+        // ▼ 修正: 実労働時間（退勤 - 出勤 - 休憩）が8時間（480分）を超える場合、退勤時間を8時間ぴったりに自動短縮する
+        const actualWorkMinutes = actualEnd - actualStart - breakMin;
+        if (actualWorkMinutes > 480) {
+          actualEnd = actualStart + 480 + breakMin;
+        }
+
+        const startObj = minutesToHHMM(actualStart);
+        const endObj = minutesToHHMM(actualEnd);
+        const head = hourCodeMap[startObj.hour];
+        if (!head) return "";
+        return `${head}${pad2(startObj.minute)}${endObj.hhmm}${pad2(breakMin)}-`;
+      };
+
+      const handleExportKOTCSV = () => {
+        setIsLoading(true);
+        const rowsToProcess = [];
+        let missingTimeCount = 0; // 空白変換した数をカウント
+        
+        staffUsers.filter(u => u.status === 'active').forEach(u => {
+          const role = determineRole(u);
+          daysArray.forEach(day => {
+            const dateObj = new Date(currentYear, currentMonth - 1, day);
+            const dateYmd = `${currentYear}${pad2(currentMonth)}${pad2(day)}`;
+            
+            // 週の開始日（日曜日）をキーにする（法定休日判定用）
+            const weekStart = new Date(dateObj);
+            weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+            const weekKey = `${weekStart.getFullYear()}${pad2(weekStart.getMonth()+1)}${pad2(weekStart.getDate())}`;
+            
+            let s = currentMonthShifts[u.id]?.[day] || { status: '未' };
+            let status = s.status;
+            let baseStart = s.start || "";
+            let baseEnd = s.end || "";
+            
+            // ▼ 修正: 未入力や「時間が入っていない勤務」をすべて「休み」に強制変換する
+            if (status === '未' || status === '休') {
+              status = '休み';
+            } else if (status === '勤務') {
+              const sMin = parseTimeToMinutes(baseStart);
+              const eMin = parseTimeToMinutes(baseEnd);
+              // 時間が空、または出退勤が逆転している場合はエラー回避のため「休み」にする
+              if (sMin == null || eMin == null || eMin <= sMin) {
+                status = '休み';
+                missingTimeCount++;
+              }
+            }
+            
+            const patternCode = calcPatternCode(role, status, baseStart, baseEnd, u.employeeId);
+            
+            rowsToProcess.push({ employeeCode: u.employeeId, dateObj, dateYmd, weekKey, status, patternCode });
+          });
+        });
+
+        // 週ごとにグループ化して休日判定
+        const grouped = {};
+        rowsToProcess.forEach(row => {
+          const key = `${row.employeeCode}__${row.weekKey}`;
+          if (!grouped[key]) grouped[key] = [];
+          grouped[key].push(row);
+        });
+
+        Object.keys(grouped).forEach(key => {
+          grouped[key].sort((a, b) => a.dateObj - b.dateObj);
+          let holidayCount = 0;
+          grouped[key].forEach(row => {
+            if (row.status === "休み") {
+              holidayCount++;
+              if (holidayCount === 1) {
+                row.workDayTypeCode = "2";
+                row.fullDayLeave = "法定休日";
+              } else {
+                row.workDayTypeCode = "3";
+                row.fullDayLeave = "法定外休日";
+              }
+            } else if (row.status === "有休") {
+              row.workDayTypeCode = "1";
+              row.fullDayLeave = "有休";
+            } else {
+              row.workDayTypeCode = "1";
+              row.fullDayLeave = "";
+            }
+          });
+        });
+
+        // CSV文字列の生成と出力
+        const headers = ["#勤務日", "従業員コード", "パターンコード", "勤務日種別コード", "全日休暇", "半休種別名称"];
+        const csvLines = [headers.join(",")];
+        
+        rowsToProcess.forEach(row => {
+          const line = [row.dateYmd, row.employeeCode, row.patternCode, row.workDayTypeCode, row.fullDayLeave, ""];
+          const escapedLine = line.map(val => {
+            const s = val == null ? "" : String(val);
+            if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+            return s;
+          });
+          csvLines.push(escapedLine.join(","));
+        });
+
+        const csvString = csvLines.join("\r\n");
+        
+        const unicodeArray = Encoding.stringToCode(csvString);
+        const sjisArray = Encoding.convert(unicodeArray, { to: 'SJIS', from: 'UNICODE' });
+        const uint8Array = new Uint8Array(sjisArray);
+        
+        const blob = new Blob([uint8Array], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `KOT取込用シフト_${currentYear}${pad2(currentMonth)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        
+        setIsLoading(false);
+        // 時間未入力があった場合は、ダウンロード完了時にメッセージでお知らせします
+        if (missingTimeCount > 0) {
+          showToast(`CSVをダウンロードしました（時間未入力の勤務 ${missingTimeCount}件 を「休み」に自動変換しました）`);
+        } else {
+          showToast('KOT取込用CSVをダウンロードしました');
+        }
+      };
+
       const openMailForm = () => {
         const defaultTpl = emailTemplates.length > 0 ? emailTemplates[0] : { id: '', name: '', body: '' };
         let defaultSelected = staffUsers.filter(u => u.status === 'active').map(u => u.id);
@@ -2043,9 +2295,12 @@
                           </select>
                         </div>
                         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+  <button onClick={handleExportKOTCSV} className="hidden sm:flex bg-[#f08300] rounded-md hover:bg-[#d97700] text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-csv" /> KOT用CSV出力</button>
+  
+  <button onClick={handleExportForVBA} className="hidden sm:flex bg-emerald-800 rounded-md hover:bg-emerald-900 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="table" /> シフト表反映用出力</button>
 
-<button onClick={handleExportExcel} className="hidden sm:flex bg-emerald-600 rounded-md hover:bg-emerald-700 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-excel" /> Excel出力</button>
-                          <div className="flex flex-nowrap bg-gray-100 rounded-md p-1.5 border w-full sm:w-auto overflow-x-auto no-scrollbar shrink-0">
+  <button onClick={handleExportExcel} className="hidden sm:flex bg-emerald-600 rounded-md hover:bg-emerald-700 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-excel" /> Excel出力</button>
+  <div className="flex flex-nowrap bg-gray-100 rounded-md p-1.5 border w-full sm:w-auto overflow-x-auto no-scrollbar shrink-0">
                             <button onClick={() => setShiftViewMode('month')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'month' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="th" /> 月間</button>
                             <button onClick={() => setShiftViewMode('day')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'day' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="align-left" /> 日別</button>
                           </div>
@@ -2091,19 +2346,9 @@
                         </div>
 
                         <div 
-                          id="month-table-container"
-                          className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-200px)] min-h-[600px] no-scrollbar flex-1"
-                          style={{ WebkitOverflowScrolling: 'touch', willChange: 'transform' }}
-                          onScroll={(e) => {
-                            if (isScrollingRef.current) return;
-                            isScrollingRef.current = true;
-                            const topScrollbar = e.target.previousElementSibling;
-                            if (topScrollbar && topScrollbar.scrollLeft !== e.target.scrollLeft) {
-                              topScrollbar.scrollLeft = e.target.scrollLeft;
-                            }
-                            window.requestAnimationFrame(() => { isScrollingRef.current = false; });
-                          }}
-                        >
+  id="month-table-container"
+  className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-200px)] min-h-[600px] no-scrollbar flex-1 relative"
+  style={{ WebkitOverflowScrolling: 'touch', willChange: 'transform' }}>
                           <table className="w-full text-left whitespace-nowrap bg-white border-collapse min-w-[1200px]">
                             <thead className="text-sm text-gray-700 bg-gray-100 border-b-2 sticky top-0 z-[150] shadow-sm">
                               <tr>
@@ -2149,10 +2394,9 @@
                                   return (
                                     <tr 
                                       key={`row-${user.id}`} 
-                                      // ▼ 修正: hover:z-[99] に変更して見出し(z-50)より手前に出す
-                                      className="h-[46px] relative transition-colors hover:bg-blue-50/30 hover:z-[99]"
+                                      className="h-[46px] relative transition-colors hover:bg-blue-50/30 hover:z-[200]"
                                     >
-                                      <td className="px-3 py-1.5 font-medium sticky left-0 bg-white border-r-2 z-[40] hover:z-[99]">
+                                      <td className="px-3 py-1.5 font-medium sticky left-0 bg-white border-r-2 z-[40] hover:z-[200]">
                                         <div className="flex justify-between items-center mb-0.5 gap-2">
                                           <div className="flex flex-col flex-1 min-w-0">
                                             <div className="flex items-center gap-1.5">
@@ -2187,8 +2431,7 @@
                                         
                                         return (
                                           <React.Fragment key={day}>
-                                            {/* ▼ 修正: hover:z-[99] に変更 */}
-                                            <td className={`px-1.5 text-center border-r align-middle whitespace-nowrap relative hover:z-[99] ${s.status === '休' ? (isPendingCell ? 'bg-orange-100' : 'bg-orange-50/50') : cellBg}`}>
+                                            <td className={`px-1.5 text-center border-r align-middle whitespace-nowrap relative hover:z-[200] ${s.status === '休' ? (isPendingCell ? 'bg-orange-100' : 'bg-orange-50/50') : cellBg}`}>
                                               {isPendingCell && <div className="absolute top-0 bottom-0 left-0 right-0 border-y-2 border-l-2 border-orange-400 pointer-events-none z-20"></div>}
                                               {s.status === '休' && <div className="text-[9px] text-orange-500 font-bold leading-none mb-1 relative z-10">休(調整可)</div>}
                                               <div className="relative z-10 flex items-center justify-center gap-1">
@@ -2201,8 +2444,7 @@
 )}
                                               </div>
                                             </td>
-                                            {/* ▼ 修正: hover:z-[99] に変更 */}
-                                            <td className={`px-1.5 text-center border-r-2 align-middle whitespace-nowrap relative hover:z-[99] ${s.status === '休' ? (isPendingCell ? 'bg-orange-100' : 'bg-orange-50/50') : cellBg}`}>
+                                            <td className={`px-1.5 text-center border-r-2 align-middle whitespace-nowrap relative hover:z-[200] ${s.status === '休' ? (isPendingCell ? 'bg-orange-100' : 'bg-orange-50/50') : cellBg}`}>
                                               {isPendingCell && <div className="absolute top-0 bottom-0 left-0 right-0 border-y-2 border-r-2 border-orange-400 pointer-events-none z-20"></div>}
                                               <span className={`text-sm font-bold tracking-tighter relative z-10 ${s.status === '休' ? 'text-orange-700' : 'text-blue-700'}`}>{s.end}</span>
                                             </td>
@@ -2261,7 +2503,9 @@
                         
                         {currentDailyNotes[selectedDay] && (<div className={`border-b text-sm font-bold px-4 py-2.5 text-center whitespace-pre-wrap ${currentDailyNotes[selectedDay].includes('休刊日') ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-red-50 text-red-600 border-red-200'}`}><Icon name="comment-dots" className="mr-1.5" /> {currentDailyNotes[selectedDay]}</div>)}
 
-                        <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-200px)] min-h-[600px] no-scrollbar border-t mt-2 relative" style={{ WebkitOverflowScrolling: 'touch', willChange: 'transform' }}>
+                        <div 
+  className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-200px)] min-h-[600px] no-scrollbar border-t mt-2 relative" 
+  style={{ WebkitOverflowScrolling: 'touch', willChange: 'transform' }}>
                           <div className="min-w-[1100px]">
                             <div className="flex border-b bg-gray-100 text-sm font-bold text-gray-500 sticky top-0 z-[150] shadow-sm">
                               <div className="w-64 shrink-0 px-5 py-3 border-r text-base bg-gray-100 sticky left-0 z-[160]">スタッフ / 実働時間</div>
@@ -2279,10 +2523,9 @@
                                   return (
                                     <div 
                                       key={user.id} 
-                                      // ▼ 修正: hover:z-[99] に変更
-                                      className="flex items-center group min-h-[3.25rem] py-1 relative transition-colors hover:bg-blue-50/30 hover:z-[99]"
+                                      className="flex items-center group min-h-[3.25rem] py-1 relative transition-colors hover:bg-blue-50/30 hover:z-[200]"
                                     >
-                                      <div className="w-64 shrink-0 px-4 border-r flex flex-col justify-center bg-white sticky left-0 z-[40] group-hover:bg-blue-50/50 min-h-[2.5rem] hover:z-[99]">
+                                      <div className="w-64 shrink-0 px-4 border-r flex flex-col justify-center bg-white sticky left-0 z-[40] group-hover:bg-blue-50/50 min-h-[2.5rem] hhover:z-[200]">
                                         <div className="flex items-center justify-between gap-2">
                                           <div className="flex flex-col flex-1 min-w-0">
                                             <div className="flex items-center gap-1.5">
@@ -2310,11 +2553,11 @@
                                         <div className="flex items-center gap-2 mt-0.5">
                                           {isWorking ? (<span className="text-sm rounded-md font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 border border-indigo-100">実働: {details.hours.toFixed(1)}h</span>) : (<span className="text-sm text-gray-400">シフトなし</span>)}
                                           {s.note && (
-                                            <div className="tooltip-container cursor-help" tabIndex="0">
-                                              <Icon name="comment-dots" className="text-blue-500" />
-                                              <span className="tooltip-text z-[100]">{s.note}</span>
-                                            </div>
-                                          )}
+  <div className="tooltip-container tooltip-left cursor-help" tabIndex="0">
+    <Icon name="comment-dots" className="text-blue-500" />
+    <span className="tooltip-text">{s.note}</span>
+  </div>
+)}
                                         </div>
                                       </div>
                                       <div className="flex-1 relative h-full min-h-[4rem] bg-white flex items-center">
