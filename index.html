@@ -14,6 +14,8 @@
   <link rel="stylesheet" href="https://unpkg.com/mobile-drag-drop/default.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/encoding-japanese/2.0.0/encoding.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
   <script>
     window.addEventListener('DOMContentLoaded', () => {
       MobileDragDrop.polyfill({ dragImageTranslateOverride: MobileDragDrop.scrollBehaviourDragImageTranslateOverride });
@@ -40,12 +42,18 @@
       margin-bottom: 8px; background-color: #1e293b; color: white; text-align: left; 
       padding: 8px 12px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; width: max-content;
       max-width: 150px; font-size: 11px; font-weight: bold; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
-      opacity: 0; transition: opacity 0.2s, visibility 0.2s; pointer-events: none; z-index: 999999 !important;
+      opacity: 0; transition: opacity 0.2s, visibility 0.2s; pointer-events: none; 
+      z-index: 99999999 !important; 
     }
     .tooltip-container:hover .tooltip-text, .tooltip-container:active .tooltip-text, .tooltip-container:focus-within .tooltip-text { visibility: visible; opacity: 1; }
     .tooltip-text::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px; border-width: 6px; border-style: solid; border-color: #1e293b transparent transparent transparent; }
-    .tooltip-left .tooltip-text { left: 0; transform: none; text-align: left; }
-    .tooltip-left .tooltip-text::after { left: 15px; margin-left: 0; }
+    /* ▼ 抜けていた設定を追加し、!importantで左にはみ出さないよう強制します ▼ */
+    .tooltip-left .tooltip-text { left: 0 !important; transform: none !important; text-align: left !important; }
+    .tooltip-left .tooltip-text::after { left: 10px !important; margin-left: 0 !important; }
+    
+    /* ▼ 右端で吹き出しが画面外に突き抜けないようにするための設定 ▼ */
+    .tooltip-right .tooltip-text { left: auto; right: 0; transform: none; text-align: left; }
+    .tooltip-right .tooltip-text::after { left: auto; right: 15px; margin-left: 0; }
 
     .tooltip-bottom .tooltip-text { bottom: auto; top: 130%; }
     .tooltip-bottom .tooltip-text::after { bottom: 100%; top: auto; border-color: transparent transparent #1e293b transparent; }
@@ -158,6 +166,7 @@
 
       const [modal, setModal] = useState({ isOpen: false, type: '', targetId: null, text: '', selectedDays: [] });
       const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, isAlert: false });
+      const [printModal, setPrintModal] = React.useState({ isOpen: false, selectedIds: [] });
       const [adminTab, setAdminTab] = useState('shift'); 
       const [staffOrder, setStaffOrder] = useState([]);
       
@@ -1175,57 +1184,216 @@
         showToast('Excelファイルをダウンロードしました');
       };
 
-      const handleExportForVBA = () => {
+      // ▼▼ 完成版：勤務管理表のExcel（.xlsx）出力機能（1シート統合フォーマット） ▼▼
+      const handleExportExcelXlsx = async (selectedIds) => {
+        const targetUsers = staffUsers.filter(u => u.status === 'active' && selectedIds.includes(u.id));
+        if (targetUsers.length === 0) {
+          alert('出力するスタッフが選択されていません。');
+          return;
+        }
+
         setIsLoading(true);
-        
-        const timeToDecimal = (timeStr) => {
-          if (!timeStr) return "";
-          const [h, m] = timeStr.split(':').map(Number);
-          if (isNaN(h) || isNaN(m)) return "";
-          return h + (m / 60);
-        };
 
-        const exportData = [];
-        // ヘッダー：社員番号、名前、日付、出勤、退勤のみ
-        exportData.push(["社員番号", "スタッフ名", "日付", "出勤時間", "退勤時間"]);
-        
-        staffUsers.filter(u => u.status === 'active').forEach(u => {
-          const empId = u.employeeId || "";
-          const name = getDisplayName(u.name);
-          
-          daysArray.forEach(day => {
-            const s = currentMonthShifts[u.id]?.[day];
-            let startVal = "";
-            let endVal = "";
+        try {
+          const workbook = new ExcelJS.Workbook();
+          const formatHM = (mins) => {
+            if (mins === "" || mins === undefined || isNaN(mins)) return "";
+            const h = Math.floor(mins / 60);
+            const m = mins % 60;
+            return `${h}:${String(m).padStart(2, '0')}`;
+          };
+
+          // シートは1つだけ作成する
+          const sheet = workbook.addWorksheet('勤務表');
+
+          // 1. 列幅の設定
+          sheet.columns = [
+            { width: 3.5 }, { width: 4.5 }, { width: 7.5 }, { width: 7.5 }, { width: 8.5 },
+            { width: 7.5 }, { width: 9.5 }, { width: 7.5 }, { width: 7.5 }, { width: 7.5 },
+            { width: 9.5 }, { width: 22 }, { width: 5.5 }
+          ];
+
+          // 選択されたスタッフごとに縦に表を追加していく
+          for (let userIndex = 0; userIndex < targetUsers.length; userIndex++) {
+            const u = targetUsers[userIndex];
+            const empId = u.employeeId || "";
+            const name = getDisplayName(u.name);
+
+            // 2. タイトルと社員情報
+            const titleRow = sheet.addRow([`${currentYear}年${currentMonth}月度 勤務管理表`, '', '', '', '', '', '', '', '', '', '', '', '']);
+            sheet.mergeCells(titleRow.number, 1, titleRow.number, 7);
+            titleRow.getCell(1).font = { size: 14, bold: true, name: 'ＭＳ Ｐゴシック' };
+
+            sheet.addRow([]); // 空行
+
+            const infoRow = sheet.addRow(['', '', '', '', '社員番号：', empId, '', '氏名：', name, '', '', '', '']);
+            infoRow.getCell(5).alignment = { horizontal: 'right' };
+            infoRow.getCell(8).alignment = { horizontal: 'right' };
+            infoRow.font = { size: 11, name: 'ＭＳ Ｐゴシック' };
+
+            // 3. ヘッダーの作成
+            const h1Row = sheet.addRow(['日', '曜日', '予定シフト', '', '', '', '', '実労働', '', '', '', '変更理由', '確認']);
+            const h2Row = sheet.addRow(['', '', '出勤', '退勤', '勤務時間', '休憩', '実労働時間', '出勤', '退勤', '休憩', '総労働時間', '', '']);
             
-            // 勤務の場合のみ時間を計算する
-            if (s && s.status === '勤務') {
-              startVal = timeToDecimal(s.start);
-              endVal = timeToDecimal(s.end);
+            const r1 = h1Row.number;
+            const r2 = h2Row.number;
+            
+            sheet.mergeCells(r1, 1, r2, 1);
+            sheet.mergeCells(r1, 2, r2, 2);
+            sheet.mergeCells(r1, 3, r1, 7);
+            sheet.mergeCells(r1, 8, r1, 11);
+            sheet.mergeCells(r1, 12, r2, 12);
+            sheet.mergeCells(r1, 13, r2, 13);
+
+            for (let r = r1; r <= r2; r++) {
+              for (let c = 1; c <= 13; c++) {
+                const cell = sheet.getCell(r, c);
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                cell.font = { size: 10, name: 'ＭＳ Ｐゴシック' };
+              }
             }
-            
-            // メモを除外して、5列分だけのデータを作成する
-            exportData.push([empId, name, day, startVal, endVal]);
-          });
-        });
 
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.aoa_to_sheet(exportData);
-        
-        // 列幅の調整（5列分に最適化）
-        ws['!cols'] = [
-          { wch: 12 }, // 社員番号
-          { wch: 15 }, // スタッフ名
-          { wch: 8 },  // 日付
-          { wch: 10 }, // 出勤時間
-          { wch: 10 }  // 退勤時間
-        ];
+            // 4. 「例」行
+            const exampleRow = sheet.addRow(['例', '', '8:30', '18:00', '9:30', '1:10', '8:20', '8:30', '18:00', '1:10', '8:20', '社員依頼、出勤時間変更', '']);
+            for (let c = 1; c <= 13; c++) {
+              const cell = exampleRow.getCell(c);
+              cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+              cell.alignment = { horizontal: 'center', vertical: 'middle' };
+              cell.font = { size: 10, name: 'ＭＳ Ｐゴシック', color: { argb: 'FF666666' } };
+              if (c === 12) { cell.alignment.horizontal = 'left'; cell.font.size = 9; }
+            }
 
-        XLSX.utils.book_append_sheet(wb, ws, "VBA転記用");
-        XLSX.writeFile(wb, `VBA転記データ_${currentYear}年${currentMonth}月.xlsx`);
+            let workDaysCount = 0;
+            let totalActualWorkMins = 0;
+
+            // 5. 日々のデータ計算
+            for (let i = 1; i <= 31; i++) {
+              const day = i;
+              const s = currentMonthShifts[u.id]?.[day];
+              const lastDayOfMonth = new Date(currentYear, currentMonth, 0).getDate();
+              
+              if (day > lastDayOfMonth) {
+                const emptyRow = sheet.addRow([day, '', '', '', '', '', '', '', '', '', '', '', '']);
+                emptyRow.eachCell({ includeEmpty: true }, (cell) => {
+                  cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                  cell.font = { size: 11, name: 'ＭＳ Ｐゴシック' };
+                });
+                continue;
+              }
+
+              let outStart = ""; let outEnd = ""; 
+              let outWork = ""; let outRest = ""; let outActual = ""; let outReason = "";
+              let dayOfWeek = getDayOfWeek(day);
+
+              if (s) {
+                if (s.status === '勤務') {
+                  if (s.start && s.end) {
+                    const deductMin = (u.role === 'admin' && u.employmentCategory !== '社員') ? 15 : 10;
+                    const [sh, sm] = s.start.split(':').map(Number);
+                    const [eh, em] = s.end.split(':').map(Number);
+                    
+                    let startTotalMin = sh * 60 + sm;
+                    let endTotalMin = eh * 60 + em;
+                    if (endTotalMin < startTotalMin) endTotalMin += 24 * 60; 
+                    
+                    const scheduledMin = endTotalMin - startTotalMin;
+                    let printStartMin = startTotalMin - deductMin;
+                    if (printStartMin < 0) printStartMin += 24 * 60;
+                    
+                    outStart = `${Math.floor(printStartMin / 60) % 24}:${String(printStartMin % 60).padStart(2, '0')}`;
+                    outEnd = `${eh}:${String(em).padStart(2, '0')}`; 
+                    
+                    const workMin = scheduledMin + deductMin;
+                    outWork = formatHM(workMin);
+                    
+                    let baseRest = Number(s.rest) || 0;
+                    if (baseRest === 0 && scheduledMin >= 360) baseRest = 60;
+                    
+                    const totalRestMin = baseRest + deductMin;
+                    if (totalRestMin > 0) {
+                      outRest = formatHM(totalRestMin);
+                      const actualMin = Math.max(0, workMin - totalRestMin);
+                      outActual = formatHM(actualMin);
+                      
+                      workDaysCount++;
+                      totalActualWorkMins += actualMin;
+                    }
+                  }
+                } else if (s.status === '有休') {
+                  outReason = "有休";
+                }
+              }
+
+              const row = sheet.addRow([day, dayOfWeek, outStart, outEnd, outWork, outRest, outActual, '', '', '', '', outReason, '']);
+              
+              row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                cell.alignment = { horizontal: 'center', vertical: 'middle' };
+                cell.font = { size: 11, name: 'ＭＳ Ｐゴシック' };
+                if (colNumber === 12) cell.alignment.horizontal = 'left';
+                if (dayOfWeek === '土') cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F2FF' } };
+                if (dayOfWeek === '日') cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE6E6' } };
+              });
+            }
+
+            // 6. 合計行の追加
+            const totalRow = sheet.addRow(['合計', '', '出勤日数', `${workDaysCount}日`, '予定労働時間', '', '', '実労働時間', '', formatHM(totalActualWorkMins), '', '', '']);
+            totalRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+              cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+              cell.font = { size: 11, bold: true, name: 'ＭＳ Ｐゴシック' };
+              cell.alignment = { horizontal: 'center', vertical: 'middle' };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+            });
+
+            // 7. フッター（注意事項）
+            sheet.addRow([]);
+            const f1 = sheet.addRow(['※有給休暇を利用する際は、取得希望日1週間前までに有給休暇の申請書を提出してください。']);
+            f1.getCell(1).font = { size: 11, bold: true, name: 'ＭＳ Ｐゴシック' };
+            const f2 = sheet.addRow(['※勤務契約にそった月間時間数の勤務をお願いいたします。']);
+            f2.getCell(1).font = { size: 11, bold: true, name: 'ＭＳ Ｐゴシック' };
+            const f3 = sheet.addRow(['　【　A…月間１２０時間以上　、　B…月間８０時間以上１２０時間未満　、　C…月間８０時間未満　】']);
+            f3.getCell(1).font = { size: 11, bold: true, name: 'ＭＳ Ｐゴシック' };
+
+            // 複数人の場合、次の人の表の前に余白行を追加する
+            if (userIndex < targetUsers.length - 1) {
+              sheet.addRow([]);
+              sheet.addRow([]);
+              sheet.addRow([]);
+            }
+          }
+
+          // 8. 印刷設定（シート全体に対して1度だけ設定する）
+          sheet.pageSetup = { 
+            paperSize: 9, 
+            orientation: 'portrait', 
+            fitToPage: true, 
+            fitToWidth: 1, 
+            fitToHeight: 0, // 縦方向は1ページに縮小せず、そのまま次ページへ送る
+            margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0, footer: 0 } 
+          };
+
+          // ファイルを .xlsx 形式でダウンロード
+          const buffer = await workbook.xlsx.writeBuffer();
+          const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+          const downloadUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = downloadUrl;
+          a.download = `勤務管理表_${currentYear}年${String(currentMonth).padStart(2, '0')}月度.xlsx`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(downloadUrl);
+
+        } catch (error) {
+          console.error(error);
+          alert('Excel出力に失敗しました。');
+        }
+
         setIsLoading(false);
-        showToast('VBA転記用ファイルをダウンロードしました');
       };
+      // ▲▲ ここまで追加 ▲▲
 
       const hourCodeMap = { 0:"Q", 1:"R", 2:"S", 3:"T", 4:"U", 5:"V", 6:"W", 7:"X", 8:"A", 9:"B", 10:"C", 11:"D", 12:"E", 13:"F", 14:"G", 15:"H", 16:"I", 17:"J", 18:"K", 19:"L", 20:"M", 21:"N", 22:"O", 23:"P" };
       const roleRules = {
@@ -1314,6 +1482,79 @@
         const head = hourCodeMap[startObj.hour];
         if (!head) return "";
         return `${head}${pad2(startObj.minute)}${endObj.hhmm}${pad2(breakMin)}-`;
+      };
+
+      const handleExportForShift = () => {
+        setIsLoading(true);
+        
+        // 1. ヘッダー作成
+        const headers = ["社員番号", "スタッフ名", "日付", "出勤時間", "退勤時間", "勤怠"];
+        const csvRows = [headers.join(",")];
+
+        // 時間の表記を「09:00」→「9」、「18:00」→「18」などに変換
+        const formatTimeForExcel = (timeStr) => {
+          if (!timeStr) return "";
+          const parts = timeStr.split(':');
+          if (parts.length !== 2) return timeStr;
+          const h = parseInt(parts[0], 10);
+          const m = parts[1];
+          return m === '00' ? h.toString() : `${h}:${m}`;
+        };
+
+        // 2. スタッフ×日付ごとに1行ずつデータを作成
+        staffUsers.filter(u => u.status === 'active').forEach(u => {
+          const empId = u.employeeId || "";
+          const staffName = getDisplayName(u.name);
+          
+          daysArray.forEach(day => {
+            const s = currentMonthShifts[u.id]?.[day] || { status: '未' };
+            
+            let outStart = "";
+            let outEnd = "";
+            let outStatus = "";
+            
+            if (s.status === '勤務') {
+              outStart = formatTimeForExcel(s.start);
+              outEnd = formatTimeForExcel(s.end);
+            } else if (s.status === '有休') {
+              outStatus = "有給"; 
+            }
+            // ※「休」の場合は outStatus に何も入れず空欄のままにします
+            
+            const rowData = [
+              empId,
+              staffName,
+              day,
+              outStart,
+              outEnd,
+              outStatus
+            ];
+            
+            const escapedRow = rowData.map(v => `"${String(v).replace(/"/g, '""')}"`);
+            csvRows.push(escapedRow.join(","));
+          });
+        });
+
+        // 3. CSV形式の文字列に変換
+        const csvString = csvRows.join("\r\n");
+        
+        // 4. Excelで文字化けしないようにSJISに変換してダウンロード
+        const unicodeArray = Encoding.stringToCode(csvString);
+        const sjisArray = Encoding.convert(unicodeArray, { to: 'SJIS', from: 'UNICODE' });
+        const uint8Array = new Uint8Array(sjisArray);
+        
+        const blob = new Blob([uint8Array], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `シフト表貼付用データ_${currentYear}年${currentMonth}月.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        
+        setIsLoading(false);
+        if (typeof showToast === 'function') showToast('シフト表貼付用データを出力しました');
       };
 
       const handleExportKOTCSV = () => {
@@ -2295,12 +2536,16 @@
                           </select>
                         </div>
                         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-  <button onClick={handleExportKOTCSV} className="hidden sm:flex bg-[#f08300] rounded-md hover:bg-[#d97700] text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-csv" /> KOT用CSV出力</button>
-  
-  <button onClick={handleExportForVBA} className="hidden sm:flex bg-emerald-800 rounded-md hover:bg-emerald-900 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="table" /> シフト表反映用出力</button>
+                          <button onClick={() => setPrintModal({ isOpen: true, selectedIds: staffUsers.filter(u => u.status === 'active').map(u => u.id), exportType: 'kot' })} className="hidden sm:flex bg-[#f08300] rounded-md hover:bg-[#d97700] text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-csv" /> KOT用CSV出力</button>
+                          
+                          <button onClick={handleExportForShift} className="hidden sm:flex bg-emerald-800 rounded-md hover:bg-emerald-900 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="table" /> シフト表反映用出力</button>
 
-  <button onClick={handleExportExcel} className="hidden sm:flex bg-emerald-600 rounded-md hover:bg-emerald-700 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-excel" /> Excel出力</button>
-  <div className="flex flex-nowrap bg-gray-100 rounded-md p-1.5 border w-full sm:w-auto overflow-x-auto no-scrollbar shrink-0">
+                          <button onClick={handleExportExcel} className="hidden sm:flex bg-emerald-600 rounded-md hover:bg-emerald-700 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-excel" /> Excel出力</button>
+
+                          <button onClick={() => setPrintModal({ isOpen: true, selectedIds: staffUsers.filter(u => u.status === 'active').map(u => u.id), exportType: 'excel' })} className="hidden sm:flex bg-gray-600 rounded-md hover:bg-gray-700 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-excel" /> 勤務管理表貼付データ出力</button>
+                          
+                          {/* ▼ 前回ここから下が抜けていました ▼ */}
+                          <div className="flex flex-nowrap bg-gray-100 rounded-md p-1.5 border w-full sm:w-auto overflow-x-auto no-scrollbar shrink-0">
                             <button onClick={() => setShiftViewMode('month')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'month' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="th" /> 月間</button>
                             <button onClick={() => setShiftViewMode('day')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'day' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="align-left" /> 日別</button>
                           </div>
@@ -2330,26 +2575,11 @@
                     {shiftViewMode === 'month' && (
                       <div className="bg-white rounded-md shadow-sm border mt-2 relative flex flex-col">
                         <div 
-                          className="overflow-x-scroll overflow-y-hidden" 
-                          style={{ minHeight: '14px', WebkitOverflowScrolling: 'touch' }}
-                          onScroll={(e) => {
-                            if (isScrollingRef.current) return;
-                            isScrollingRef.current = true;
-                            const tableContainer = document.getElementById('month-table-container');
-                            if (tableContainer && tableContainer.scrollLeft !== e.target.scrollLeft) {
-                              tableContainer.scrollLeft = e.target.scrollLeft;
-                            }
-                            window.requestAnimationFrame(() => { isScrollingRef.current = false; });
-                          }}
+                          id="month-table-container"
+                          className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-200px)] min-h-[600px] no-scrollbar flex-1 relative"
+                          style={{ WebkitOverflowScrolling: 'touch', willChange: 'transform' }}
                         >
-                          <div style={{ width: '1200px', height: '1px' }}></div>
-                        </div>
-
-                        <div 
-  id="month-table-container"
-  className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-200px)] min-h-[600px] no-scrollbar flex-1 relative"
-  style={{ WebkitOverflowScrolling: 'touch', willChange: 'transform' }}>
-                          <table className="w-full text-left whitespace-nowrap bg-white border-collapse min-w-[1200px]">
+                          <table className="w-max min-w-full text-left whitespace-nowrap bg-white border-collapse">
                             <thead className="text-sm text-gray-700 bg-gray-100 border-b-2 sticky top-0 z-[150] shadow-sm">
                               <tr>
                                 <th rowSpan={2} className="px-4 py-1 sticky left-0 top-0 bg-gray-100 z-[160] border-r-2 text-center min-w-[160px] text-base">スタッフ</th>
@@ -2394,9 +2624,9 @@
                                   return (
                                     <tr 
                                       key={`row-${user.id}`} 
-                                      className="h-[46px] relative transition-colors hover:bg-blue-50/30 hover:z-[200]"
+                                      className="h-[46px] transition-colors hover:bg-blue-50/30"
                                     >
-                                      <td className="px-3 py-1.5 font-medium sticky left-0 bg-white border-r-2 z-[40] hover:z-[200]">
+                                      <td className="px-3 py-1.5 font-medium sticky left-0 bg-white border-r-2 z-[40] hover:z-[400]">
                                         <div className="flex justify-between items-center mb-0.5 gap-2">
                                           <div className="flex flex-col flex-1 min-w-0">
                                             <div className="flex items-center gap-1.5">
@@ -2431,20 +2661,20 @@
                                         
                                         return (
                                           <React.Fragment key={day}>
-                                            <td className={`px-1.5 text-center border-r align-middle whitespace-nowrap relative hover:z-[200] ${s.status === '休' ? (isPendingCell ? 'bg-orange-100' : 'bg-orange-50/50') : cellBg}`}>
+                                            <td className={`px-1.5 text-center border-r align-middle whitespace-nowrap relative hover:z-[400] ${s.status === '休' ? (isPendingCell ? 'bg-orange-100' : 'bg-orange-50/50') : cellBg}`}>
                                               {isPendingCell && <div className="absolute top-0 bottom-0 left-0 right-0 border-y-2 border-l-2 border-orange-400 pointer-events-none z-20"></div>}
                                               {s.status === '休' && <div className="text-[9px] text-orange-500 font-bold leading-none mb-1 relative z-10">休(調整可)</div>}
                                               <div className="relative z-10 flex items-center justify-center gap-1">
                                                 <span className={`text-sm font-bold tracking-tighter ${s.status === '休' ? 'text-orange-700' : 'text-blue-700'}`}>{s.start}</span>
                                                 {s.note && (
-  <div className="tooltip-container tooltip-bottom tooltip-left cursor-help" tabIndex="0">
+  <div className={`tooltip-container tooltip-bottom ${day >= 16 ? 'tooltip-right' : 'tooltip-left'} cursor-help`} tabIndex="0">
     <Icon name="comment-dots" className="text-blue-500" />
     <span className="tooltip-text">{s.note}</span>
   </div>
 )}
                                               </div>
                                             </td>
-                                            <td className={`px-1.5 text-center border-r-2 align-middle whitespace-nowrap relative hover:z-[200] ${s.status === '休' ? (isPendingCell ? 'bg-orange-100' : 'bg-orange-50/50') : cellBg}`}>
+                                            <td className={`px-1.5 text-center border-r-2 align-middle whitespace-nowrap relative hover:z-[400] ${s.status === '休' ? (isPendingCell ? 'bg-orange-100' : 'bg-orange-50/50') : cellBg}`}>
                                               {isPendingCell && <div className="absolute top-0 bottom-0 left-0 right-0 border-y-2 border-r-2 border-orange-400 pointer-events-none z-20"></div>}
                                               <span className={`text-sm font-bold tracking-tighter relative z-10 ${s.status === '休' ? 'text-orange-700' : 'text-blue-700'}`}>{s.end}</span>
                                             </td>
@@ -2457,9 +2687,9 @@
                               )}
                             </tbody>
                             {filteredShiftUsers.length > 0 && (
-                              <tfoot className="sticky bottom-0 z-[150] shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.15)]">
+                              <tfoot className="sticky bottom-0 z-[300] shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.15)]">
                                 <tr className="bg-indigo-50 border-t-2 border-indigo-300">
-                                  <td className="px-3 py-3 font-bold sticky left-0 bg-indigo-50 border-r-2 z-[160] text-sm text-indigo-900">
+                                  <td className="px-3 py-3 font-bold sticky left-0 bg-indigo-50 border-r-2 z-[310] text-sm text-indigo-900">
                                     <div className="flex flex-col gap-1 items-start">
                                       <div className="flex items-center gap-1"><Icon name="users" size={14}/>出勤人数</div>
                                       <span className="text-[10px] text-indigo-500 font-bold mt-0.5">{displayFilter === 'all' ? '全員の集計' : displayFilter === 'admin' ? '管理者の集計' : 'スタッフの集計'}</span>
@@ -2475,7 +2705,7 @@
                                   })}
                                 </tr>
                                 <tr className="bg-indigo-100/90 backdrop-blur-sm border-t border-indigo-200">
-                                  <td className="px-3 py-3 font-bold sticky left-0 bg-indigo-100/90 backdrop-blur-sm border-r-2 z-[60] text-sm text-indigo-900"><div className="flex items-center gap-1"><Icon name="clock" size={14}/>稼働時間</div></td>
+                                  <td className="px-3 py-3 font-bold sticky left-0 bg-indigo-100/90 backdrop-blur-sm border-r-2 z-[310] text-sm text-indigo-900"><div className="flex items-center gap-1"><Icon name="clock" size={14}/>稼働時間</div></td>
                                   {daysArray.map(day => {
                                     const { totalHours } = getDailySummary(day);
                                     return (<td key={`hours-${day}`} colSpan={2} className="px-2 py-2 text-center border-r-2 align-middle"><span className={`font-black text-base ${totalHours > 0 ? 'text-indigo-700' : 'text-gray-400 font-normal text-sm'}`}>{totalHours > 0 ? totalHours.toFixed(1) + 'h' : '-'}</span></td>);
@@ -2523,9 +2753,9 @@
                                   return (
                                     <div 
                                       key={user.id} 
-                                      className="flex items-center group min-h-[3.25rem] py-1 relative transition-colors hover:bg-blue-50/30 hover:z-[200]"
+                                      className="flex items-center group min-h-[3.25rem] py-1 relative transition-colors hover:bg-blue-50/30 hover:z-[400]"
                                     >
-                                      <div className="w-64 shrink-0 px-4 border-r flex flex-col justify-center bg-white sticky left-0 z-[40] group-hover:bg-blue-50/50 min-h-[2.5rem] hhover:z-[200]">
+                                      <div className="w-64 shrink-0 px-4 border-r flex flex-col justify-center bg-white sticky left-0 z-[40] group-hover:bg-blue-50/50 min-h-[2.5rem] hover:z-[400]">
                                         <div className="flex items-center justify-between gap-2">
                                           <div className="flex flex-col flex-1 min-w-0">
                                             <div className="flex items-center gap-1.5">
@@ -3201,6 +3431,62 @@
                 <div className="bg-white px-5 py-4 flex justify-end gap-3 border-t shrink-0">
                   <button onClick={() => setProxyShiftForm({...proxyShiftForm, isOpen: false})} className="px-5 py-2.5 font-bold text-gray-600 border rounded-md hover:bg-gray-50">キャンセル</button>
                   <button onClick={saveProxyShift} className="px-6 py-2.5 font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-md shadow-sm">代理で提出する</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+{/* ▼ 出力スタッフ選択モーダル（KOT / 勤務管理表 共通） ▼ */}
+          {printModal.isOpen && (
+            <div className="fixed inset-0 bg-black/50 z-[99999] flex items-center justify-center p-4">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] flex flex-col">
+                <div className="p-4 border-b bg-gray-50 rounded-t-lg flex justify-between items-center">
+                  <h3 className="text-lg font-bold text-gray-800">
+                    <Icon name={printModal.exportType === 'kot' ? "file-csv" : "file-excel"} className="mr-2" />
+                    {printModal.exportType === 'kot' ? 'KOT用CSV - 出力スタッフ選択' : '勤務管理表 - 出力スタッフ選択'}
+                  </h3>
+                  <button onClick={() => setPrintModal({ ...printModal, isOpen: false })} className="text-gray-400 hover:text-gray-600"><Icon name="times" size={20} /></button>
+                </div>
+                <div className="p-4 flex-1 overflow-y-auto">
+                  <div className="flex justify-between mb-3 border-b pb-2">
+                    <button onClick={() => setPrintModal({...printModal, selectedIds: staffUsers.filter(u => u.status === 'active').map(u => u.id)})} className="text-sm text-blue-600 hover:underline font-bold"><Icon name="check-square" className="mr-1"/>すべて選択</button>
+                    <button onClick={() => setPrintModal({...printModal, selectedIds: []})} className="text-sm text-gray-600 hover:underline"><Icon name="square" className="mr-1"/>すべて解除</button>
+                  </div>
+                  <div className="space-y-1">
+                    {staffUsers.filter(u => u.status === 'active').map(u => (
+                      <label key={u.id} className="flex items-center gap-3 p-2 hover:bg-blue-50 rounded cursor-pointer transition-colors border-b border-gray-100 last:border-0">
+                        <input 
+                          type="checkbox" 
+                          checked={printModal.selectedIds.includes(u.id)}
+                          onChange={(e) => {
+                            const newIds = e.target.checked 
+                              ? [...printModal.selectedIds, u.id]
+                              : printModal.selectedIds.filter(id => id !== u.id);
+                            setPrintModal({ ...printModal, selectedIds: newIds });
+                          }}
+                          className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                        />
+                        <span className="font-bold text-gray-700">{getDisplayName(u.name)}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="bg-gray-50 px-5 py-4 border-t flex justify-end gap-3 rounded-b-lg">
+                  <button onClick={() => setPrintModal({ ...printModal, isOpen: false })} className="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-md transition-colors">キャンセル</button>
+                  <button 
+                    onClick={() => {
+                      if (printModal.exportType === 'kot') {
+                        handleExportKOTCSV(printModal.selectedIds);
+                      } else {
+                        handleExportExcelXlsx(printModal.selectedIds); 
+                      }
+                      setPrintModal({ ...printModal, isOpen: false });
+                    }} 
+                    disabled={printModal.selectedIds.length === 0}
+                    className={`px-6 py-2.5 rounded-md font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed shadow-sm flex items-center gap-2 transition-colors ${printModal.exportType === 'kot' ? 'bg-[#f08300] hover:bg-[#d97700]' : 'bg-gray-600 hover:bg-gray-700'}`}
+                  >
+                    <Icon name={printModal.exportType === 'kot' ? "file-csv" : "file-excel"} /> {printModal.selectedIds.length}名分を出力
+                  </button>
                 </div>
               </div>
             </div>
