@@ -2542,11 +2542,10 @@
                           
                           <button onClick={handleExportForShift} className="hidden sm:flex bg-emerald-800 rounded-md hover:bg-emerald-900 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="table" /> シフト表反映用出力</button>
 
-                          <button onClick={handleExportExcel} className="hidden sm:flex bg-emerald-600 rounded-md hover:bg-emerald-700 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-excel" /> Excel出力</button>
-
                           <button onClick={() => setPrintModal({ isOpen: true, selectedIds: staffUsers.filter(u => u.status === 'active').map(u => u.id), exportType: 'excel' })} className="hidden sm:flex bg-gray-600 rounded-md hover:bg-gray-700 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-excel" /> 勤務管理表貼付データ出力</button>
+
+                          <button onClick={handleExportExcel} className="hidden sm:flex bg-emerald-600 rounded-md hover:bg-emerald-700 text-white font-bold py-2 px-4 text-sm shadow-sm items-center justify-center gap-2"><Icon name="file-excel" /> Excel出力</button>
                           
-                          {/* ▼ 前回ここから下が抜けていました ▼ */}
                           <div className="flex flex-nowrap bg-gray-100 rounded-md p-1.5 border w-full sm:w-auto overflow-x-auto no-scrollbar shrink-0">
                             <button onClick={() => setShiftViewMode('month')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'month' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="th" /> 月間</button>
                             <button onClick={() => setShiftViewMode('day')} className={`flex-1 whitespace-nowrap min-w-[100px] rounded-md flex justify-center items-center gap-2 px-3 py-2 text-sm font-bold ${shiftViewMode === 'day' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Icon name="align-left" /> 日別</button>
