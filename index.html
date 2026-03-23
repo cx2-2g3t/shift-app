@@ -1118,22 +1118,26 @@
         }});
       };
 
-      // ▼ CSV出力をExcel（.xlsx）出力に変更
+      // ▼ CSV出力をExcel（.xlsx）出力に変更（日別メモ追加版）
       const handleExportExcel = () => {
         setIsLoading(true);
         
         // 1. 出力するデータ（表の形）を作成
         const exportData = [];
         
-        // ヘッダー（1行目）を追加：日付の次に「曜日」を追加
-        exportData.push(["社員番号", "名前", "役割", "雇用区分", "日付", "曜日", "ステータス", "出勤", "退勤", "調整可能", "備考", "月間コメント"]);
+        // ヘッダー（1行目）を追加：曜日の次に「日別メモ」を追加
+        exportData.push(["社員番号", "名前", "役割", "雇用区分", "日付", "曜日", "日別メモ", "ステータス", "出勤", "退勤", "調整可能", "備考", "月間コメント"]);
         
         // データ行を追加
         staffUsers.filter(u => u.status === 'active').forEach(u => {
           const mNote = currentMonthShifts[u.id]?.monthlyNote || '';
+          
           daysArray.forEach(d => {
             const s = currentMonthShifts[u.id]?.[d] || { status: '未' };
             const dNote = s.note || '';
+            
+            // ★その日の「日別メモ」を取得
+            const dailyNote = currentDailyNotes[d] || ''; 
             
             // 勤務、または「休（調整可）」の時に時間を出力する
             const shouldOutputTime = s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded);
@@ -1150,7 +1154,8 @@
               u.position || '',
               u.employmentCategory || '',
               `${currentMonth}/${d}`,
-              dayOfWeek, // 曜日をデータに追加
+              dayOfWeek,
+              dailyNote, // 日別メモをデータに追加
               s.status,
               outStart,
               outEnd,
@@ -1173,6 +1178,7 @@
           { wch: 12 }, // 雇用区分
           { wch: 8 },  // 日付
           { wch: 6 },  // 曜日
+          { wch: 15 }, // 日別メモ
           { wch: 10 }, // ステータス
           { wch: 8 },  // 出勤
           { wch: 8 },  // 退勤
