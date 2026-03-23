@@ -1557,18 +1557,26 @@
         if (typeof showToast === 'function') showToast('シフト表貼付用データを出力しました');
       };
 
-      const handleExportKOTCSV = () => {
+      // ▼▼ ここから修正：KOT用CSV出力機能（選択スタッフのみ出力） ▼▼
+      const handleExportKOTCSV = (selectedIds) => {
+        // 渡されたIDのスタッフだけに絞り込む
+        const targetUsers = staffUsers.filter(u => u.status === 'active' && selectedIds.includes(u.id));
+        if (targetUsers.length === 0) {
+          alert('出力するスタッフが選択されていません。');
+          return;
+        }
+
         setIsLoading(true);
         const rowsToProcess = [];
-        let missingTimeCount = 0; // 空白変換した数をカウント
+        let missingTimeCount = 0; 
         
-        staffUsers.filter(u => u.status === 'active').forEach(u => {
+        // 全員ではなく、絞り込んだ targetUsers だけでループを回す
+        targetUsers.forEach(u => {
           const role = determineRole(u);
           daysArray.forEach(day => {
             const dateObj = new Date(currentYear, currentMonth - 1, day);
             const dateYmd = `${currentYear}${pad2(currentMonth)}${pad2(day)}`;
             
-            // 週の開始日（日曜日）をキーにする（法定休日判定用）
             const weekStart = new Date(dateObj);
             weekStart.setDate(weekStart.getDate() - weekStart.getDay());
             const weekKey = `${weekStart.getFullYear()}${pad2(weekStart.getMonth()+1)}${pad2(weekStart.getDate())}`;
@@ -1578,13 +1586,11 @@
             let baseStart = s.start || "";
             let baseEnd = s.end || "";
             
-            // ▼ 修正: 未入力や「時間が入っていない勤務」をすべて「休み」に強制変換する
             if (status === '未' || status === '休') {
               status = '休み';
             } else if (status === '勤務') {
               const sMin = parseTimeToMinutes(baseStart);
               const eMin = parseTimeToMinutes(baseEnd);
-              // 時間が空、または出退勤が逆転している場合はエラー回避のため「休み」にする
               if (sMin == null || eMin == null || eMin <= sMin) {
                 status = '休み';
                 missingTimeCount++;
@@ -1592,12 +1598,10 @@
             }
             
             const patternCode = calcPatternCode(role, status, baseStart, baseEnd, u.employeeId);
-            
             rowsToProcess.push({ employeeCode: u.employeeId, dateObj, dateYmd, weekKey, status, patternCode });
           });
         });
 
-        // 週ごとにグループ化して休日判定
         const grouped = {};
         rowsToProcess.forEach(row => {
           const key = `${row.employeeCode}__${row.weekKey}`;
@@ -1628,7 +1632,6 @@
           });
         });
 
-        // CSV文字列の生成と出力
         const headers = ["#勤務日", "従業員コード", "パターンコード", "勤務日種別コード", "全日休暇", "半休種別名称"];
         const csvLines = [headers.join(",")];
         
@@ -1643,7 +1646,6 @@
         });
 
         const csvString = csvLines.join("\r\n");
-        
         const unicodeArray = Encoding.stringToCode(csvString);
         const sjisArray = Encoding.convert(unicodeArray, { to: 'SJIS', from: 'UNICODE' });
         const uint8Array = new Uint8Array(sjisArray);
@@ -1659,13 +1661,13 @@
         URL.revokeObjectURL(url);
         
         setIsLoading(false);
-        // 時間未入力があった場合は、ダウンロード完了時にメッセージでお知らせします
         if (missingTimeCount > 0) {
-          showToast(`CSVをダウンロードしました（時間未入力の勤務 ${missingTimeCount}件 を「休み」に自動変換しました）`);
+          if (typeof showToast === 'function') showToast(`CSVをダウンロードしました（時間未入力の勤務 ${missingTimeCount}件 を「休み」に自動変換しました）`);
         } else {
-          showToast('KOT取込用CSVをダウンロードしました');
+          if (typeof showToast === 'function') showToast('KOT取込用CSVをダウンロードしました');
         }
       };
+      // ▲▲ ここまで修正 ▲▲
 
       const openMailForm = () => {
         const defaultTpl = emailTemplates.length > 0 ? emailTemplates[0] : { id: '', name: '', body: '' };
