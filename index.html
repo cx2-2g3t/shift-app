@@ -2110,14 +2110,18 @@
       // 代理シフト入力用のState（対象月を保持できるように修正）
       const [proxyShiftForm, setProxyShiftForm] = useState({ isOpen: false, userId: null, userName: '', shifts: {}, targetMonth: '' });
 
-      // 代理シフト入力フォームを開く処理
+      // ▼▼ 修正：代理シフト入力フォームを開く処理（月間コメント引き継ぎ版） ▼▼
       const openProxyShiftForm = (user) => {
-        const initShifts = {};
-        // ★ activeTargetMonth から currentMonthStr に修正
         const currentShifts = shifts[currentMonthStr]?.[user.id] || {};
+        
+        // ★修正ポイント：まずは既存のデータ（月間コメントなど）をすべてコピーして保持する
+        const initShifts = { ...currentShifts };
+        
+        // その上で、1〜31日の日々のデータが空の場合は初期値をセットする
         daysArray.forEach(d => {
           initShifts[d] = currentShifts[d] || { status: '未', start: DEFAULT_START_TIME, end: DEFAULT_END_TIME, canWorkIfNeeded: false, note: '' };
         });
+        
         setProxyShiftForm({ isOpen: true, userId: user.id, userName: getDisplayName(user.name), shifts: initShifts, targetMonth: currentMonthStr });
       };
 
@@ -2911,6 +2915,25 @@
                                   if (statusText === '提出済') statusColor = 'bg-green-100 text-green-700'; else if (statusText === '途中保存') statusColor = 'bg-yellow-100 text-yellow-700';
                                   if (isConfirmed && hasPending) { statusColor = 'bg-orange-100 text-orange-700 border border-orange-200'; statusText = '承認待ち'; }
 
+                                  // ▼▼ 追加：月間稼働時間と出勤日数の計算 ▼▼
+                                  let monthlyTotalHours = 0;
+                                  let monthlyWorkDays = 0; // ★出勤日数カウント用を追加
+
+                                  daysArray.forEach(day => {
+                                    const s = currentMonthShifts[user.id]?.[day];
+                                    // 勤務、または休(調整可)で時間が入っているものを対象とする
+                                    if (s && (s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded))) {
+                                      if (s.start && s.end) {
+                                        const details = calculateShiftDetails(s.start, s.end);
+                                        if (details.hours > 0) {
+                                          monthlyTotalHours += details.hours;
+                                          monthlyWorkDays++; // ★実働時間が発生する日を「1日」としてカウント
+                                        }
+                                      }
+                                    }
+                                  });
+                                  // ▲▲ 追加ここまで ▲▲
+
                                   return (
                                     <tr 
                                       key={`row-${user.id}`} 
@@ -2938,7 +2961,17 @@
                                             <button onClick={() => setModal({isOpen: true, type: 'personal', targetId: user.id, text: personalNotes[user.id]||''})} className={`p-1.5 rounded-md shrink-0 shadow-sm relative z-30 ${personalNotes[user.id] ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' : 'bg-gray-100 text-gray-400 border border-gray-200'}`}><Icon name="comment-dots" size={14} /></button>
                                           </div>
                                         </div>
-                                        <span className={`text-[10px] rounded-md font-bold px-2 py-0.5 inline-block whitespace-nowrap ${statusColor}`}>{statusText}</span>
+                                        
+                                        {/* ▼ バッジと稼働時間・出勤日数の並び ▼ */}
+                                        <div className="flex items-center gap-2 mt-1">
+                                          <span className={`text-[10px] rounded-md font-bold px-2 py-0.5 inline-block whitespace-nowrap ${statusColor}`}>{statusText}</span>
+                                          
+                                          {monthlyTotalHours > 0 && (
+                                            <span className="text-[10px] rounded-md font-bold px-2 py-0.5 inline-block whitespace-nowrap bg-indigo-100 text-indigo-700">
+                                              {monthlyWorkDays}日 / {monthlyTotalHours.toFixed(1)}h
+                                            </span>
+                                          )}
+                                        </div>
                                       </td>
                                       {daysArray.map(day => {
                                         const s = currentMonthShifts[user.id]?.[day] || { status: '未' };
@@ -3721,6 +3754,19 @@
                       );
                     })}
                   </div>
+
+                    <div className="mt-3 sm:mt-4 bg-white border border-gray-200 rounded-md p-3 sm:p-4 shadow-sm">
+                    <label className="flex items-center gap-2 text-xs sm:text-sm font-bold text-gray-700 mb-2">
+                      <Icon name="comment-dots" className="text-purple-500" /> 月間コメント・連絡事項 (任意)
+                    </label>
+                    <textarea 
+                      value={proxyShiftForm.shifts.monthlyNote || ''} 
+                      onChange={(e) => setProxyShiftForm(prev => ({ ...prev, shifts: { ...prev.shifts, monthlyNote: e.target.value } }))} 
+                      placeholder="管理者側から代理でコメントを残す・編集することができます"
+                      className="w-full border border-gray-300 rounded-md p-2 sm:p-3 text-xs sm:text-sm focus:ring-2 focus:ring-purple-300 outline-none resize-none h-20"
+                    />
+                  </div>
+
                 </div>
 
                 <div className="bg-white px-5 py-4 flex justify-end gap-3 border-t shrink-0">
