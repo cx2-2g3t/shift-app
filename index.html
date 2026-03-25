@@ -159,7 +159,8 @@
       
       const [dbUsers, setDbUsers] = useState([]);
       const [shifts, setShifts] = useState({}); 
-      const [submissionStatus, setSubmissionStatus] = useState({}); 
+      const [originalShifts, setOriginalShifts] = useState({});
+      const [submissionStatus, setSubmissionStatus] = useState({});
       const [dailyNotes, setDailyNotes] = useState({}); 
       const [personalNotes, setPersonalNotes] = useState({});
       const [adminNotifications, setAdminNotifications] = useState([]);
@@ -294,6 +295,7 @@
               }
             });
             setShifts(shiftsState); setSubmissionStatus(statusState);
+            setOriginalShifts(JSON.parse(JSON.stringify(shiftsState)));
 
             const dailyNotesState = {};
             (data.dailyNotes || []).forEach(row => {
@@ -630,7 +632,7 @@
         });
       };
 
-      // ▼▼ シフトの保存処理（内部関数） ▼▼
+      // ▼▼ シフトの保存処理とTeams通知機能（差分自動抽出版） ▼▼
       const executeSubmitShift = (isSubmit, unenteredDays = [], adjustableDays = []) => {
         setIsLoading(true);
         const statusToSave = isSubmit ? '提出済' : '途中保存';
@@ -647,23 +649,72 @@
           });
         }
 
+        // ▼▼ 追加：変更前と変更後の差分を抽出するロジック ▼▼
+        let diffText = "";
+        const oldShifts = (originalShifts[activeTargetMonth] || {})[currentUser.id] || {};
+        
+        // 比較用の文字列を作成する関数（09:00 の 0 などを省いて見やすくする）
+        const getShiftStrForDiff = (s) => {
+          if (!s || s.status === '未') return '未入力';
+          if (s.status === '休' && !s.canWorkIfNeeded) return '休';
+          if (s.status === '有休') return '有休';
+          const formatTime = (t) => t ? t.replace(/^0/, '') : '';
+          if (s.status === '勤務') return `勤務(${formatTime(s.start)}-${formatTime(s.end)})`;
+          if (s.status === '休' && s.canWorkIfNeeded) return `休(調整可 ${formatTime(s.start)}-${formatTime(s.end)})`;
+          return s.status;
+        };
+
+        if (isSubmit) {
+          daysArray.forEach(day => {
+            const oldS = oldShifts[day] || { status: '未' };
+            const newS = shiftsToSave[day] || { status: '未' };
+            const oldStr = getShiftStrForDiff(oldS);
+            const newStr = getShiftStrForDiff(newS);
+            
+            // 変更があった日だけをリストアップする
+            if (oldStr !== newStr) {
+              diffText += `・${day}日：[ ${oldStr} ] ⇒ [ ${newStr} ]\n`;
+            }
+          });
+        }
+        // ▲▲ 差分チェック ここまで ▲▲
+
         const record = { recordId: `${currentUser.id}_${activeTargetMonth}`, userId: currentUser.id, month: activeTargetMonth, status: statusToSave, shiftData: shiftsToSave };
 
         fetchGAS('saveRecord', 'shifts', 'recordId', record)
           .then(() => {
             // Teamsへ通知（エラー時は裏側でログを出す）
             if (isSubmit) {
-              // ▼ 修正：月を数字(4など)にし、名前のスペースはそのまま残す
               const monthNum = Number(activeTargetMonth.split('-')[1]);
+              const prevStatus = (submissionStatus[activeTargetMonth] || {})[currentUser.id] || '未提出';
+              let notifyText = "";
+
+              // 状況に応じてTeamsの通知文面を切り替える
+              if (prevStatus === '提出済' && isOverdue && diffText !== "") {
+                // パターン1：締切日以降に、内容を変更して再提出された場合
+                notifyText = `⚠️ **【再提出】${getDisplayName(currentUser.name)}さんがシフトを変更しました**\n締切日以降に ${monthNum}月分 シフトの変更（再提出）がありました。\n\n**【変更箇所】**\n${diffText}`;
+              } else if (prevStatus === '提出済' && diffText !== "") {
+                // パターン2：締切前に、内容を変更して再提出された場合
+                notifyText = `🔄 **再提出**\n${getDisplayName(currentUser.name)}さんが${monthNum}月分のシフトを再提出しました。\n\n**【変更箇所】**\n${diffText}`;
+              } else if (prevStatus === '提出済' && diffText === "") {
+                // パターン3：内容は何も変えずに再提出ボタンだけ押した場合
+                notifyText = `🔄 **再提出**\n${getDisplayName(currentUser.name)}さんが${monthNum}月分のシフトを再提出しました。（※変更箇所はありません）`;
+              } else {
+                // パターン4：初めての提出の場合
+                notifyText = `✅ **シフト提出**\n${getDisplayName(currentUser.name)}さんから${monthNum}月分のシフトが提出されました。`;
+              }
               
-              fetchGAS('sendTeamsNotification', `✅ **シフト提出**\n${getDisplayName(currentUser.name)}さんから${monthNum}月分のシフトが提出されました。`)
-                .catch(e => console.error("Teams通知エラー:", e));
+              fetchGAS('sendTeamsNotification', notifyText).catch(e => console.error("Teams通知エラー:", e));
             }
 
             if (unenteredDays.length > 0) {
               setShifts(prev => ({ ...prev, [activeTargetMonth]: { ...(prev[activeTargetMonth] || {}), [currentUser.id]: shiftsToSave } }));
             }
             setSubmissionStatus(prev => ({ ...prev, [activeTargetMonth]: { ...(prev[activeTargetMonth] || {}), [currentUser.id]: statusToSave } }));
+            
+            // 保存が成功したら、次回の比較のために「記憶箱」を最新状態に上書きする
+            setOriginalShifts(prev => ({ ...prev, [activeTargetMonth]: { ...(prev[activeTargetMonth] || {}), [currentUser.id]: JSON.parse(JSON.stringify(shiftsToSave)) } }));
+            
             setConfirmModal({ isOpen: true, title: '処理完了', message: isSubmit ? 'シフトの提出が完了しました。' : 'シフトを一時保存しました。', isAlert: true, onConfirm: null });
             setIsLoading(false);
           })
@@ -1589,6 +1640,7 @@
         return `${head}${pad2(startObj.minute)}${endObj.hhmm}${pad2(breakMin)}-`;
       };
 
+      // ▼▼ 完成版：シフト表貼付用データ出力（縦形式・休は空欄・特殊条件追加） ▼▼
       const handleExportForShift = () => {
         setIsLoading(true);
         
@@ -1608,7 +1660,8 @@
 
         // 2. スタッフ×日付ごとに1行ずつデータを作成
         staffUsers.filter(u => u.status === 'active').forEach(u => {
-          const empId = u.employeeId || "";
+          // 比較エラーを防ぐため、社員番号を確実に文字列にしておく
+          const empId = String(u.employeeId || ""); 
           const staffName = getDisplayName(u.name);
           
           daysArray.forEach(day => {
@@ -1621,10 +1674,16 @@
             if (s.status === '勤務') {
               outStart = formatTimeForExcel(s.start);
               outEnd = formatTimeForExcel(s.end);
+              
+              // ★★★ 追加：特定の社員＆特定の時間の例外ルール ★★★
+              if (empId === "20120049" && s.start === "10:00" && s.end === "16:00") {
+                outEnd = "15.75"; // 退勤時間を15.75で上書きする
+              }
+
             } else if (s.status === '有休') {
               outStatus = "有給"; 
             }
-            // ※「休」の場合は outStatus に何も入れず空欄のままにします
+            // ※「休」の場合は outStatus に何も入れず空欄のまま
             
             const rowData = [
               empId,
