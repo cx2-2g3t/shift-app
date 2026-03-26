@@ -2917,17 +2917,17 @@
 
                                   // ▼▼ 追加：月間稼働時間と出勤日数の計算 ▼▼
                                   let monthlyTotalHours = 0;
-                                  let monthlyWorkDays = 0; // ★出勤日数カウント用を追加
+                                  let monthlyWorkDays = 0;
 
                                   daysArray.forEach(day => {
                                     const s = currentMonthShifts[user.id]?.[day];
-                                    // 勤務、または休(調整可)で時間が入っているものを対象とする
-                                    if (s && (s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded))) {
+                                    // ★修正：ステータスが「勤務」の場合のみ計算する（休(調整可)は除外）
+                                    if (s && s.status === '勤務') {
                                       if (s.start && s.end) {
                                         const details = calculateShiftDetails(s.start, s.end);
                                         if (details.hours > 0) {
                                           monthlyTotalHours += details.hours;
-                                          monthlyWorkDays++; // ★実働時間が発生する日を「1日」としてカウント
+                                          monthlyWorkDays++; 
                                         }
                                       }
                                     }
@@ -3769,9 +3769,28 @@
 
                 </div>
 
-                <div className="bg-white px-5 py-4 flex justify-end gap-3 border-t shrink-0">
-                  <button onClick={() => setProxyShiftForm({...proxyShiftForm, isOpen: false})} className="px-5 py-2.5 font-bold text-gray-600 border rounded-md hover:bg-gray-50">キャンセル</button>
-                  <button onClick={saveProxyShift} className="px-6 py-2.5 font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-md shadow-sm">代理で提出する</button>
+                <div className="bg-white px-5 py-4 flex flex-wrap items-center justify-between gap-3 border-t shrink-0">
+                  {/* ▼▼ 追加：代理登録画面でのリアルタイム計算表示 ▼▼ */}
+                  <div className="text-sm font-bold text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-md border border-indigo-100 shadow-sm flex items-center gap-2">
+                    <Icon name="calculator" />
+                    {(() => {
+                      // モーダル内で変更中のシフトデータをリアルタイムに計算
+                      let pDays = 0; let pHours = 0;
+                      daysArray.forEach(d => {
+                        const s = proxyShiftForm.shifts[d];
+                        if (s && s.status === '勤務' && s.start && s.end) {
+                          const det = calculateShiftDetails(s.start, s.end);
+                          if (det.hours > 0) { pDays++; pHours += det.hours; }
+                        }
+                      });
+                      return `編集中: ${pDays}日 / ${pHours.toFixed(1)}h`;
+                    })()}
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button onClick={() => setProxyShiftForm({...proxyShiftForm, isOpen: false})} className="px-5 py-2.5 font-bold text-gray-600 border rounded-md hover:bg-gray-50">キャンセル</button>
+                    <button onClick={saveProxyShift} className="px-6 py-2.5 font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-md shadow-sm">代理で提出する</button>
+                  </div>
                 </div>
               </div>
             </div>
