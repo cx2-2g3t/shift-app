@@ -203,7 +203,8 @@
       
       const [fixedShifts, setFixedShifts] = useState({});
       const [fixedShiftForm, setFixedShiftForm] = useState({ isOpen: false, userId: null, userName: '', data: {} });
-
+      const [targetCounts, setTargetCounts] = useState({ admin: {}, staff: {} });
+      const [targetSettingRole, setTargetSettingRole] = useState('staff');
       const currentYear = displayDate.getFullYear();
       const currentMonth = displayDate.getMonth() + 1;
       const currentMonthStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
@@ -356,6 +357,7 @@
           });
       }, []); 
 
+      // ▼▼ 修正：15秒間隔で最新データを即時反映する処理 ▼▼
       useEffect(() => {
         const intervalId = setInterval(() => {
           if (!document.hidden) {
@@ -374,6 +376,7 @@
 
                 setChangeRequests(data.changeRequests || []);
                 setAdminNotifications(data.notifications || []);
+                
                 const dailyNotesState = {};
                 (data.dailyNotes || []).forEach(row => {
                   const dKey = String(row.dateKey || '');
@@ -388,12 +391,39 @@
                   }
                 });
                 setDailyNotes(dailyNotesState);
+
+                // ▼▼ 追加：シフト・提出状況も裏側で最新化する ▼▼
+                const shiftsState = {}; const statusState = {};
+                (data.shifts || []).forEach(row => {
+                  if (row.month) {
+                    if (!shiftsState[row.month]) shiftsState[row.month] = {};
+                    if (!statusState[row.month]) statusState[row.month] = {};
+                    shiftsState[row.month][row.userId] = typeof row.shiftData === 'string' ? JSON.parse(row.shiftData) : row.shiftData;
+                    statusState[row.month][row.userId] = row.status;
+                  }
+                });
+
+                setSubmissionStatus(statusState);
+                setOriginalShifts(JSON.parse(JSON.stringify(shiftsState)));
+
+                setShifts(prev => {
+                  const newShifts = { ...shiftsState };
+                  // 【重要】スタッフが現在入力中のデータを上書きして消さないための保護処理
+                  if (currentUser && currentUser.role === 'staff' && activeTargetMonth) {
+                    if (prev[activeTargetMonth] && prev[activeTargetMonth][currentUser.id]) {
+                      if (!newShifts[activeTargetMonth]) newShifts[activeTargetMonth] = {};
+                      newShifts[activeTargetMonth][currentUser.id] = prev[activeTargetMonth][currentUser.id];
+                    }
+                  }
+                  return newShifts;
+                });
               })
               .catch(() => {});
           }
-        }, 300000); // 間隔はお好みで
+        }, 15000); // ★ 300000(5分) から 15000(15秒) に短縮して「即時」を体感できるようにする
+        
         return () => clearInterval(intervalId);
-      }, []);
+      }, [currentUser, activeTargetMonth]); // ★ 常に最新のユーザー情報を参照させる
 
       const generateMailText = (text) => {
         if (!text) return '';
@@ -455,6 +485,57 @@
         });
         return { confirmed, possible };
       };
+
+// ▼▼ 追加：管理者・オペ別カウント関数と目標保存処理 ▼▼
+      const getHourlyCountDetailed = (day, hour) => {
+        let adminConfirmed = 0, adminPossible = 0;
+        let staffConfirmed = 0, staffPossible = 0;
+        
+        staffUsers.forEach(u => {
+          if (u.status === 'retired') return;
+          const s = currentMonthShifts[u.id]?.[day]; if (!s) return;
+          if (s.status === '勤務' || (s.status === '休' && s.canWorkIfNeeded)) {
+            const details = calculateShiftDetails(s.start, s.end); if (details.hours === 0) return;
+            let isWorkingThisHour = (details.startVal <= hour && details.endVal > hour);
+            if (isWorkingThisHour && details.hasBreak && details.breakStartVal <= hour && details.breakEndVal > hour) isWorkingThisHour = false;
+            
+            if (isWorkingThisHour) {
+               if (u.role === 'admin') {
+                   if (s.status === '勤務') adminConfirmed++; else adminPossible++;
+               } else {
+                   if (s.status === '勤務') staffConfirmed++; else staffPossible++;
+               }
+            }
+          }
+        });
+        return { admin: { confirmed: adminConfirmed, possible: adminPossible }, staff: { confirmed: staffConfirmed, possible: staffPossible } };
+      };
+
+      const handleTargetCountChange = (role, dow, hour, val) => {
+        const num = val === '' ? '' : parseInt(val, 10);
+        setTargetCounts(prev => ({ 
+          ...prev, 
+          [role]: { 
+            ...(prev[role] || {}), 
+            [dow]: {
+               ...((prev[role] || {})[dow] || {}),
+               [hour]: num
+            }
+          } 
+        }));
+      };
+
+      const handleTargetCountBlur = () => {
+        fetchGAS('saveRecord', 'settings', 'key', { key: 'targetHeadcounts', value: JSON.stringify(targetCounts) });
+      };
+      
+      // 初回のみ目標設定データを読み込む
+      useEffect(() => {
+        fetchGAS('getInitialData').then(data => {
+          const targetCountsObj = (data.settings || []).find(s => s.key === 'targetHeadcounts');
+          if (targetCountsObj) { try { setTargetCounts(JSON.parse(targetCountsObj.value)); } catch(e){} }
+        }).catch(()=>{});
+      }, []);
 
       const getDailySummary = (day) => {
         let confirmed = 0; let possible = 0; let totalHours = 0;
@@ -769,6 +850,7 @@
         setChangeForm({ isOpen: true, day: initialDay, status: currentShift.status === '未' ? '勤務' : currentShift.status, start: currentShift.start || DEFAULT_START_TIME, end: currentShift.end || DEFAULT_END_TIME, canWorkIfNeeded: currentShift.canWorkIfNeeded || false, note: currentShift.note || '', reason: '', changeCategory: '', confirmedBy: '' });
       };
 
+      // ▼▼ 修正：「更新」ボタンでシフト情報も完全に最新化する処理 ▼▼
       const handleManualRefresh = () => {
         setIsLoading(true);
         fetchGAS('getInitialData')
@@ -806,6 +888,32 @@
               }
             });
             setDailyNotes(dailyNotesState);
+
+            // ▼▼ 追加：シフト・提出状況も手動更新で最新化する ▼▼
+            const shiftsState = {}; const statusState = {};
+            (data.shifts || []).forEach(row => {
+              if (row.month) {
+                if (!shiftsState[row.month]) shiftsState[row.month] = {};
+                if (!statusState[row.month]) statusState[row.month] = {};
+                shiftsState[row.month][row.userId] = typeof row.shiftData === 'string' ? JSON.parse(row.shiftData) : row.shiftData;
+                statusState[row.month][row.userId] = row.status;
+              }
+            });
+
+            setSubmissionStatus(statusState);
+            setOriginalShifts(JSON.parse(JSON.stringify(shiftsState)));
+
+            setShifts(prev => {
+              const newShifts = { ...shiftsState };
+              if (currentUser && currentUser.role === 'staff' && activeTargetMonth) {
+                if (prev[activeTargetMonth] && prev[activeTargetMonth][currentUser.id]) {
+                  if (!newShifts[activeTargetMonth]) newShifts[activeTargetMonth] = {};
+                  newShifts[activeTargetMonth][currentUser.id] = prev[activeTargetMonth][currentUser.id];
+                }
+              }
+              return newShifts;
+            });
+
             setIsLoading(false);
             if (typeof showToast === 'function') showToast('最新のデータに更新しました', 'success');
           })
@@ -988,7 +1096,7 @@
               const template = emailTemplates.find(t => t.name && t.name.includes('却下'));
 
               let subjectStr = `【却下】シフト変更申請の結果`;
-              let bodyStr = `${staffLastName}さん\n\nお疲れ様です。${adminLastName}です。\n申請いただいた ${mon}月${daysStr} のシフト変更ですが、今回はシフトの都合により却下となりました。\n詳細は直接またはチャット等でご相談ください。よろしくお願いします。`;
+              let bodyStr = `${staffLastName}さん\n\nお疲れ様です。${adminLastName}です。\n申請いただいた ${mon}月${daysStr} のシフト変更ですが、今回はシフトの都合により却下となりました。\n詳細は直接またはメール等でご相談ください。よろしくお願いします。`;
 
               if (template) {
                 subjectStr = (template.name || subjectStr)
@@ -2372,7 +2480,8 @@
                   </div>
                 )}
 
-                {isActiveMonth && (
+                {/* ▼ 修正：全体確定済みの場合は締切日を非表示にする ▼ */}
+                {isActiveMonth && !isConfirmed && (
                   <div className={`rounded-md p-4 flex items-center justify-between border shadow-sm ${isOverdue ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'}`}>
                     <div className="flex items-center gap-2">
                       <Icon name="calendar-alt" size={24} className={isOverdue ? "text-red-500" : "text-gray-500"} />
@@ -2431,7 +2540,9 @@
                 {isActiveMonth && (
                   <div className={`bg-white rounded-md shadow-sm p-4 flex items-center justify-between border-l-4 ${hasPending ? 'border-orange-500' : 'border-blue-500'}`}>
                     <span className={`font-bold text-base flex items-center gap-2 text-gray-700`}><Icon name="info-circle" size={20} className={hasPending ? "text-orange-500" : "text-blue-500"}/> 現在の状況:</span>
-                    <span className={`px-3 py-1 rounded-md text-sm sm:text-base font-bold ${myStatus === '提出済' ? 'bg-green-100 text-green-700' : (isConfirmed && hasPending) ? 'bg-orange-100 text-orange-700 border border-orange-200' : myStatus === '途中保存' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-200 text-gray-700'}`}>{isConfirmed && hasPending ? '申請結果待ち' : myStatus}</span>
+                    <span className={`px-3 py-1 rounded-md text-sm sm:text-base font-bold ${(isConfirmed && hasPending) ? 'bg-orange-100 text-orange-700 border border-orange-200' : myStatus === '提出済' ? 'bg-green-100 text-green-700' : myStatus === '途中保存' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-200 text-gray-700'}`}>
+                      {isConfirmed && hasPending ? '申請結果待ち' : (isConfirmed && myStatus === '提出済' ? '確定済' : myStatus)}
+                    </span>
                   </div>
                 )}
 
@@ -3140,21 +3251,76 @@
                                 })
                               )}
                             </div>
-                            <div className="flex border-t-2 border-indigo-300 bg-indigo-50 items-stretch py-1.5 sticky bottom-0 z-[150] shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.15)]">
-                              <div className="w-64 shrink-0 px-3 border-r border-indigo-200 flex flex-col justify-center bg-indigo-50 sticky left-0 z-[160]">
-                                <span className="text-xs font-bold text-indigo-900 mb-1 flex items-center gap-1"><Icon name="users" size={10}/>時間帯ごとの出勤人数</span>
-                                <span className="text-[10px] text-indigo-600 font-bold mt-0.5">{displayFilter === 'all' ? '全員の集計' : displayFilter === 'admin' ? '管理者の集計' : 'スタッフの集計'}</span>
+
+                            {/* ▼▼ 修正：管理者・オペレーター別の目標と過不足表示 ▼▼ */}
+                            <div className="flex flex-col border-t-2 border-indigo-400 sticky bottom-0 z-[500] bg-white shadow-[0_-8px_15px_-3px_rgba(0,0,0,0.2)]">
+                              
+                              {/* オペレーター集計行 */}
+                              <div className="flex items-stretch bg-white border-b border-gray-200">
+                                <div className="w-64 shrink-0 px-4 py-2.5 flex items-center justify-between border-r border-blue-200 bg-blue-50 sticky left-0 z-[510]">
+                                  <span className="text-base font-bold text-blue-900 flex items-center gap-1.5"><Icon name="headset" size={16}/> オペレーター</span>
+                                  <div className="flex flex-col items-end text-xs font-bold gap-1">
+                                    <span className="text-gray-600 bg-white px-2 py-0.5 rounded border shadow-sm">目標</span>
+                                    <span className="text-blue-800">実績 <span className="text-gray-500 font-normal text-[10px]">(過不足)</span></span>
+                                  </div>
+                                </div>
+                                <div className="flex-1 flex relative min-w-0">
+                                  {timeAxis.map(h => {
+                                     const { staff } = getHourlyCountDetailed(selectedDay, h);
+                                     const dow = new Date(currentYear, currentMonth - 1, selectedDay).getDay();
+                                     const target = targetCounts.staff?.[dow]?.[h] !== undefined ? targetCounts.staff[dow][h] : '';
+                                     const diff = target !== '' ? staff.confirmed - target : null;
+                                     const isShort = diff !== null && diff < 0;
+                                     return (
+                                       <div key={`staff-${h}`} className={`flex-1 w-0 min-w-0 border-r border-gray-200 flex flex-col items-center justify-center py-1.5 px-0.5 gap-0.5 ${isShort ? 'bg-red-50/50' : 'bg-white'}`}>
+                                         {/* ▼ inputを廃止し、設定タブから引っ張ってきた数字を表示するだけに変更 ▼ */}
+                                         <div className="text-[11px] font-bold text-gray-500 h-[18px] flex items-center justify-center bg-white/50 w-full rounded">{target !== '' ? target : '-'}</div>
+                                         <div className="flex items-baseline justify-center gap-0.5 whitespace-nowrap w-full overflow-visible mt-0.5">
+                                            <span className={`text-base font-black ${staff.confirmed > 0 ? 'text-blue-800' : 'text-blue-300'}`}>{staff.confirmed > 0 ? staff.confirmed : '0'}</span>
+                                            {diff !== null && (
+                                              <span className={`text-[10px] font-bold tracking-tighter ${diff < 0 ? 'text-red-600' : diff > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                                                ({diff > 0 ? '+' : ''}{diff})
+                                              </span>
+                                            )}
+                                         </div>
+                                       </div>
+                                     )
+                                  })}
+                                </div>
                               </div>
-                              <div className="flex-1 flex relative">
-                                {timeAxis.map(h => {
-                                   const { confirmed, possible } = getHourlyCount(selectedDay, h);
-                                   return (
-                                     <div key={h} className="flex-1 border-r border-indigo-200 flex flex-col items-center justify-center">
-                                       <span className={`text-base font-black ${confirmed > 0 ? 'text-indigo-700 text-xl' : 'text-indigo-300'}`}>{confirmed > 0 ? confirmed : '-'}</span>
-                                       {possible > 0 && <span className="text-xs font-bold text-orange-600">(+{possible})</span>}
-                                     </div>
-                                   )
-                                })}
+                              
+                              {/* 管理者集計行 */}
+                              <div className="flex items-stretch bg-white">
+                                <div className="w-64 shrink-0 px-4 py-2.5 flex items-center justify-between border-r border-indigo-200 bg-indigo-50 sticky left-0 z-[510]">
+                                  <span className="text-base font-bold text-indigo-900 flex items-center gap-1.5"><Icon name="user-tie" size={16}/> 管理者</span>
+                                  <div className="flex flex-col items-end text-xs font-bold gap-1">
+                                    <span className="text-gray-600 bg-white px-2 py-0.5 rounded border shadow-sm">目標</span>
+                                    <span className="text-indigo-800">実績 <span className="text-gray-500 font-normal text-[10px]">(過不足)</span></span>
+                                  </div>
+                                </div>
+                                <div className="flex-1 flex relative min-w-0">
+                                  {timeAxis.map(h => {
+                                     const { admin } = getHourlyCountDetailed(selectedDay, h);
+                                     const dow = new Date(currentYear, currentMonth - 1, selectedDay).getDay();
+                                     const target = targetCounts.admin?.[dow]?.[h] !== undefined ? targetCounts.admin[dow][h] : '';
+                                     const diff = target !== '' ? admin.confirmed - target : null;
+                                     const isShort = diff !== null && diff < 0;
+                                     return (
+                                       <div key={`admin-${h}`} className={`flex-1 w-0 min-w-0 border-r border-gray-200 flex flex-col items-center justify-center py-1.5 px-0.5 gap-0.5 ${isShort ? 'bg-red-50/50' : 'bg-white'}`}>
+                                         {/* ▼ inputを廃止し、設定タブから引っ張ってきた数字を表示するだけに変更 ▼ */}
+                                         <div className="text-[11px] font-bold text-gray-500 h-[18px] flex items-center justify-center bg-white/50 w-full rounded">{target !== '' ? target : '-'}</div>
+                                         <div className="flex items-baseline justify-center gap-0.5 whitespace-nowrap w-full overflow-visible mt-0.5">
+                                            <span className={`text-base font-black ${admin.confirmed > 0 ? 'text-indigo-800' : 'text-indigo-300'}`}>{admin.confirmed > 0 ? admin.confirmed : '0'}</span>
+                                            {diff !== null && (
+                                              <span className={`text-[10px] font-bold tracking-tighter ${diff < 0 ? 'text-red-600' : diff > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                                                ({diff > 0 ? '+' : ''}{diff})
+                                              </span>
+                                            )}
+                                         </div>
+                                       </div>
+                                     )
+                                  })}
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -3381,6 +3547,52 @@
                 {/* 4. 設定・テンプレタブ */}
                 {adminTab === 'settings' && (
                   <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
+
+                    <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+                      <div className="bg-indigo-50 px-5 py-4 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <h2 className="text-indigo-900 font-bold flex items-center gap-2 text-lg"><Icon name="users-cog" /> 目標人数設定（曜日・時間帯別）</h2>
+                        <div className="flex gap-2">
+                          <button onClick={() => setTargetSettingRole('staff')} className={`px-4 py-1.5 font-bold text-sm rounded-md transition-colors ${targetSettingRole === 'staff' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border text-gray-600 hover:bg-gray-100'}`}>オペレーター</button>
+                          <button onClick={() => setTargetSettingRole('admin')} className={`px-4 py-1.5 font-bold text-sm rounded-md transition-colors ${targetSettingRole === 'admin' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border text-gray-600 hover:bg-gray-100'}`}>管理者</button>
+                        </div>
+                      </div>
+                      <div className="p-5 bg-gray-50 flex flex-col gap-3">
+                        <div className="overflow-x-auto bg-white border rounded-md shadow-sm no-scrollbar">
+                          <table className="w-full text-sm text-center border-collapse min-w-[800px]">
+                            <thead>
+                              <tr>
+                                <th className="border-b border-r p-3 bg-gray-100 text-gray-700 w-16 sticky left-0 z-10 shadow-[1px_0_0_0_#e5e7eb]">曜日</th>
+                                {timeAxis.map(h => <th key={h} className="border-b border-r p-2 bg-gray-100 text-gray-700 font-bold w-12">{h}:00</th>)}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {[1, 2, 3, 4, 5, 6, 0].map(dow => (
+                                <tr key={dow} className="hover:bg-gray-50 transition-colors">
+                                  <td className={`border-b border-r p-3 font-bold bg-white sticky left-0 z-10 shadow-[1px_0_0_0_#e5e7eb] ${DOW_COLORS[dow]}`}>{DOW_NAMES[dow]}</td>
+                                  {timeAxis.map(h => {
+                                    const val = targetCounts[targetSettingRole]?.[dow]?.[h] !== undefined ? targetCounts[targetSettingRole][dow][h] : '';
+                                    return (
+                                      <td key={h} className="border-b border-r p-1 relative">
+                                        <input 
+                                          type="number" 
+                                          value={val} 
+                                          onChange={(e) => handleTargetCountChange(targetSettingRole, dow, h, e.target.value)}
+                                          onBlur={handleTargetCountBlur}
+                                          className="w-full text-center outline-none py-1.5 focus:bg-blue-50 focus:ring-1 focus:ring-blue-300 font-bold text-gray-700 rounded" 
+                                          placeholder="-"
+                                        />
+                                      </td>
+                                    )
+                                  })}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="text-xs text-gray-500 font-bold"><Icon name="info-circle" className="text-blue-500 mr-1"/>ここに入力した目標人数は自動的に保存され、日別ガントチャートの実績エリアに反映されます。</p>
+                      </div>
+                    </div>
+
                     <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
                       <div className="bg-indigo-50 px-5 py-4 border-b flex justify-between items-center">
                         <div><h2 className="text-indigo-900 font-bold flex gap-2 text-lg"><Icon name="envelope" /> メールテンプレート設定</h2></div>
@@ -3680,7 +3892,7 @@
 
                     <div>
                       <label className="block text-sm font-bold text-gray-700 mb-1.5">変更理由 <span className="text-red-500 text-xs ml-1 font-bold">※必須</span></label>
-                      <textarea value={changeForm.reason} onChange={(e) => setChangeForm({...changeForm, reason: e.target.value})} className="w-full border p-3 rounded-md h-24 resize-none focus:ring-2 focus:ring-red-100 outline-none" placeholder="申請の理由を詳しく入力してください" />
+                      <textarea value={changeForm.reason} onChange={(e) => setChangeForm({...changeForm, reason: e.target.value})} className="w-full border p-3 rounded-md h-24 resize-none focus:ring-2 focus:ring-red-100 outline-none" placeholder="申請理由を入力してください" />
                     </div>
                   </div>
 
