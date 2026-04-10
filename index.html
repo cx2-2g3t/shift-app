@@ -2280,14 +2280,52 @@
         <div className="sticky top-0 z-[80] w-full shadow-md">
           <header className={`${view === 'admin' ? 'bg-indigo-800' : 'bg-blue-600'} text-white px-4 py-3 sm:px-6 sm:py-4 flex justify-between items-center`}>
             <div className="flex items-center gap-3">
-              <Icon name={view === 'admin' ? "user-tie" : "calendar-alt"} size={24} className="hidden sm:block" />
+              <Icon name={view === 'admin' ? "user-tie" : "calendar-alt"} size={32} className="hidden sm:block opacity-90" />
+              
               <div className="flex flex-col">
-                <h1 className="text-lg sm:text-xl font-bold">{view === 'admin' ? "シフトの窓口（管理画面）" : "シフトの窓口"}</h1>
-                <div className="flex items-center gap-2 mt-0.5 text-sm opacity-90">
-                  <button type="button" onClick={() => changeMonth(-1)} className="p-1 hover:bg-white/20 rounded-md transition-colors cursor-pointer relative z-[100]"><Icon name="chevron-left" size={12}/></button>
-                  <span className="min-w-[5rem] text-center font-medium">{currentYear}年 {currentMonth}月</span>
-                  <button type="button" onClick={() => changeMonth(1)} className="p-1 hover:bg-white/20 rounded-md transition-colors cursor-pointer relative z-[100]"><Icon name="chevron-right" size={12}/></button>
-                  <span className="ml-2 border-l border-white/40 pl-3 font-bold">{getDisplayName(currentUser?.name)}</span>
+                {/* 1段目：タイトルと状態バッジ */}
+                <div className="flex items-center gap-2 mb-1">
+                  <h1 className="text-xs sm:text-sm font-bold opacity-90">{view === 'admin' ? "シフトの窓口（管理画面）" : "シフトの窓口"}</h1>
+                  {(() => {
+                    // 現実の「今月」を表す文字列を作成 (例: 2026-04)
+                    const todayStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+                    
+                    // 1. 募集中の月（activeTargetMonth）を開いている場合
+                    if (currentMonthStr === activeTargetMonth) {
+                      return <span className="bg-blue-100 text-blue-800 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded border border-blue-200 shadow-sm flex items-center gap-1"><Icon name="play-circle" className="text-blue-600"/>現在募集中</span>;
+                    } 
+                    // 2. 募集中ではないが、現実の「今月」を開いている場合
+                    else if (currentMonthStr === todayStr) {
+                      return <span className="bg-green-100 text-green-800 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded border border-green-200 shadow-sm flex items-center gap-1"><Icon name="calendar-check" className="text-green-600"/>当月のシフト</span>;
+                    }
+                    // 3. 現実の「今月」よりも前の月を開いている場合
+                    else if (currentMonthStr < todayStr) {
+                      return <span className="bg-gray-600 text-white text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><Icon name="history" />過去のシフト</span>;
+                    } 
+                    // 4. それ以外（未来の月）
+                    else {
+                      return <span className="bg-purple-100 text-purple-800 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded border border-purple-200 shadow-sm flex items-center gap-1"><Icon name="star" className="text-purple-600"/>未来のシフト</span>;
+                    }
+                  })()}
+                </div>
+                
+                {/* 2段目：大きな月表示と切り替えボタン */}
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <button type="button" onClick={() => changeMonth(-1)} className="p-1.5 sm:p-2 bg-white/10 hover:bg-white/20 rounded-md transition-colors cursor-pointer relative z-[100]">
+                    <Icon name="chevron-left" size={16}/>
+                  </button>
+                  
+                  <span className="text-2xl sm:text-3xl font-black tracking-tight min-w-[7.5rem] sm:min-w-[9.5rem] text-center drop-shadow-md">
+                    {currentYear}年 {currentMonth}月
+                  </span>
+                  
+                  <button type="button" onClick={() => changeMonth(1)} className="p-1.5 sm:p-2 bg-white/10 hover:bg-white/20 rounded-md transition-colors cursor-pointer relative z-[100]">
+                    <Icon name="chevron-right" size={16}/>
+                  </button>
+                  
+                  <span className="hidden sm:inline-block ml-3 border-l border-white/40 pl-4 font-bold text-sm opacity-90">
+                    <Icon name="user" className="mr-1.5"/>{getDisplayName(currentUser?.name)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -2310,10 +2348,9 @@
               </button>
             </div>
           </header>
-{/* ▼▼ 修正：ポップアップの縦幅も常に大きく（高く）キープする ▼▼ */}
+{/* ▼▼ 修正：ポップアップ内で承認・却下処理を完結させる ▼▼ */}
         {isNotificationModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-[9999] flex items-center justify-center p-4 sm:p-6 animate-fade-in backdrop-blur-sm">
-            {/* ▼ 修正: max-h-[90vh] を h-[90vh] に変更。これで常に縦幅が最大化されます ▼ */}
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col overflow-hidden animate-fade-in-up">
               
               {/* ヘッダー部分 */}
@@ -2325,48 +2362,131 @@
               </div>
 
               {/* スクロールする内容部分 */}
-              <div className="p-6 overflow-y-auto bg-gray-50 flex-1">
+              <div className="p-4 sm:p-6 overflow-y-auto bg-gray-50 flex-1">
                 
-                {/* 変更申請リスト */}
-                <div>
-                  <div className="flex items-center justify-between border-b border-gray-300 pb-3 mb-5">
-                    <h3 className="font-bold text-gray-700 flex items-center gap-2 text-lg">
-                      申請一覧
-                    </h3>
-                    <span className="bg-orange-100 text-orange-700 text-sm font-bold px-3 py-1 rounded-full">{changeRequests.filter(req => req.status === 'pending').length}件</span>
-                  </div>
+                <div className="flex items-center justify-between border-b border-gray-300 pb-3 mb-5">
+                  <h3 className="font-bold text-gray-700 flex items-center gap-2 text-lg">申請一覧</h3>
+                  <span className="bg-orange-100 text-orange-700 text-sm font-bold px-3 py-1 rounded-full">{changeRequests.filter(req => req.status === 'pending').length}件</span>
+                </div>
 
-                  {changeRequests.filter(req => req.status === 'pending').length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {changeRequests.filter(req => req.status === 'pending').map(req => (
-                        <div key={req.id} className="bg-white p-5 rounded-lg border border-orange-200 shadow-sm flex flex-col justify-between gap-4 transition-all hover:shadow-md">
-                           <div className="flex-1">
-                             <div className="flex items-center justify-between mb-2">
-                                <p className="font-bold text-gray-800 text-lg flex items-center gap-2">
-                                  <Icon name="user" className="text-gray-400" /> {req.userName}
+                {changeRequests.filter(req => req.status === 'pending').length > 0 ? (
+                  <div className="flex flex-col gap-6 w-full">
+                    {changeRequests.filter(req => req.status === 'pending').map(req => {
+                      {/* --- 各申請ごとの入力状態を既存のStateから取得 --- */}
+                      const checks = approvalChecks[req.id] || { shift: false, kot: false };
+                      const category = adminChangeCategories[req.id] || req.newVal?.changeCategory || '';
+                      const attStatus = adminAttendanceStatuses[req.id] || '';
+                      const canApprove = checks.shift && checks.kot && category && attStatus;
+
+                      return (
+                        <div key={req.id} className="bg-white rounded-lg border border-orange-200 shadow-sm flex flex-col overflow-hidden transition-all hover:shadow-md h-fit">
+                           
+                           {/* 上部：申請内容表示 */}
+                           <div className="p-4 sm:p-6 bg-orange-50/30">
+                             <div className="flex items-center justify-between mb-4">
+                                <p className="font-bold text-orange-700 text-lg flex items-center gap-2">
+                                  <Icon name="exclamation-circle" /> {req.userName} さん
                                 </p>
-                                <span className="text-sm font-bold text-white bg-indigo-500 px-3 py-1 rounded-md shadow-sm">
-                                  {req.targetMonth ? `${parseInt(req.targetMonth.split('-')[1], 10)}/` : ''}{req.day}
+                                <span className="text-xs font-bold text-gray-500 bg-white px-3 py-1.5 border border-gray-200 rounded-md shadow-sm">
+                                  {req.createdAt ? req.createdAt.split(' ')[0] : ''}
                                 </span>
                              </div>
                              
-                             <div className="mt-3 flex items-center gap-3 text-base bg-gray-50 p-3 rounded-md border border-gray-200 w-full justify-center">
-                               <span className="line-through text-gray-400 font-medium">{formatShiftStr(req.oldVal)}</span>
-                               <Icon name="arrow-right" className="text-gray-400" />
-                               <span className="text-orange-600 font-bold">{formatShiftStr(req.newVal)}</span>
+                             <div className="border border-gray-200 rounded-md p-4 mb-4 bg-white shadow-sm text-sm">
+                               <p className="text-gray-800 font-bold mb-2 text-base">理由: {req.reason || '-'}</p>
+                               <p className="text-indigo-600 font-bold flex items-center gap-1.5">
+                                  <Icon name="user-check" size={14}/> 事前確認: {req.confirmedBy || '未設定'}
+                               </p>
                              </div>
-                             {req.reason && <p className="text-sm text-gray-600 mt-3 flex items-start gap-1.5 bg-white border border-gray-100 rounded p-2"><Icon name="comment-alt" className="mt-0.5 text-gray-400"/> {req.reason}</p>}
+
+                             <div className="border border-orange-200 rounded-md p-4 flex flex-col sm:flex-row sm:items-center gap-4 bg-white shadow-sm">
+                                <div className="bg-orange-100 text-orange-800 font-bold px-4 py-2 rounded-md text-base border border-orange-200 shrink-0 text-center">
+                                  {req.day}日
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-gray-400 text-sm line-through truncate">{formatShiftStr(req.oldVal)}</p>
+                                  <p className="text-orange-700 font-bold text-base flex items-center gap-1.5 mt-1"><Icon name="arrow-right" size={12} className="text-gray-400"/> {formatShiftStr(req.newVal)}</p>
+                                </div>
+                             </div>
+                           </div>
+
+                           {/* 下部：承認処理エリア */}
+                           <div className="p-4 sm:p-6 space-y-6 bg-white border-t border-gray-100">
+                             {/* 区分選択 */}
+                             <div>
+                                <p className="text-sm font-bold text-gray-700 flex items-center gap-1.5 mb-3"><Icon name="tag" className="text-indigo-500 transform rotate-90" size={14}/> 区分を確認 <span className="text-red-500 text-xs">*必須</span></p>
+                                <div className="flex gap-3">
+                                  {['自己変更', '依頼変更'].map(type => (
+                                    <button 
+                                      key={type}
+                                      onClick={() => setAdminChangeCategories(prev => ({...prev, [req.id]: type}))}
+                                      className={`w-32 sm:w-40 py-2.5 text-sm font-bold rounded-md border transition-colors ${category === type ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                                    >
+                                      {type}
+                                    </button>
+                                  ))}
+                                </div>
+                             </div>
+
+                             {/* 勤怠種別選択 */}
+                             <div>
+                                <p className="text-sm font-bold text-gray-700 flex items-center gap-1.5 mb-3"><Icon name="tag" className="text-indigo-500 transform rotate-90" size={14}/> 勤怠種別を選択 <span className="text-red-500 text-xs">*必須</span></p>
+                                <div className="flex flex-wrap gap-2">
+                                  {['出勤', '遅刻', '早退', '欠勤', '休み', '時間変更', '有休'].map(type => (
+                                     <button 
+                                       key={type}
+                                       onClick={() => setAdminAttendanceStatuses(prev => ({...prev, [req.id]: type}))}
+                                       className={`text-sm font-bold px-4 py-2.5 rounded-md border transition-colors ${attStatus === type ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                                     >
+                                       {type}
+                                     </button>
+                                  ))}
+                                </div>
+                             </div>
+
+                             {/* チェックボックス */}
+                             <div className="flex items-center justify-center gap-8 py-4 border border-gray-200 bg-gray-50/50 rounded-md">
+                                <label className="flex items-center gap-2 text-sm font-bold text-gray-700 cursor-pointer">
+                                  <input type="checkbox" checked={checks.shift} onChange={() => toggleApprovalCheck(req.id, 'shift')} className="w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500" />
+                                  シフト表更新 <span className="text-red-500">*</span>
+                                </label>
+                                <label className="flex items-center gap-2 text-sm font-bold text-gray-700 cursor-pointer">
+                                  <input type="checkbox" checked={checks.kot} onChange={() => toggleApprovalCheck(req.id, 'kot')} className="w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500" />
+                                  KOT更新 <span className="text-red-500">*</span>
+                                </label>
+                             </div>
+
+                             {/* 最終アクションボタン */}
+                             <div className="flex justify-center pt-2">
+                               <div className="flex gap-4 w-full max-w-xl">
+                                  <button 
+                                    onClick={() => handleApprove(req.id)}
+                                    disabled={!canApprove || isLoading}
+                                    className={`flex-[2] py-3.5 rounded-md font-bold text-base flex items-center justify-center gap-2 transition-all ${canApprove ? 'bg-green-600 hover:bg-green-700 text-white shadow-md active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                                  >
+                                    <Icon name="check" /> {isLoading ? '処理中...' : '承認して反映'}
+                                  </button>
+                                  <button 
+                                    onClick={() => handleReject(req.id)}
+                                    disabled={isLoading}
+                                    className="flex-[1] py-3.5 bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 rounded-md font-bold text-base flex items-center justify-center gap-2 transition-all active:scale-95 shadow-sm"
+                                  >
+                                    <Icon name="times" /> 却下
+                                  </button>
+                               </div>
+                             </div>
+
                            </div>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-16 bg-white rounded-lg border border-gray-200 shadow-inner h-full">
-                      <Icon name="check-circle" size={48} className="text-green-400 mb-4" />
-                      <p className="text-base text-gray-500 font-bold">現在、未承認の申請はありません。</p>
-                    </div>
-                  )}
-                </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full py-16 bg-white rounded-lg border border-gray-200 shadow-inner">
+                    <Icon name="check-circle" size={48} className="text-green-400 mb-4" />
+                    <p className="text-base text-gray-500 font-bold">現在、未承認の申請はありません。</p>
+                  </div>
+                )}
               </div>
 
               {/* フッター */}
