@@ -736,6 +736,7 @@
 
       // ▼▼ シフトの保存処理とTeams通知機能（差分自動抽出版） ▼▼
       const executeSubmitShift = (isSubmit, unenteredDays = [], adjustableDays = []) => {
+        if (isLoading) return;
         setIsLoading(true);
         const statusToSave = isSubmit ? '提出済' : '途中保存';
         
@@ -827,6 +828,7 @@
       };
 
       const handleSubmitShift = (isSubmit = false) => {
+        if (isLoading) return;
         if (!currentUser) return;
         const currentShiftsForSubmit = activeMonthShifts[currentUser.id] || {};
 
@@ -2972,9 +2974,30 @@
                       return (
                         <div className="flex gap-3 sm:gap-4 justify-center max-w-4xl mx-auto w-full">
                           {myStatus !== '提出済' ? (
-                            <><button onClick={() => handleSubmitShift(false)} className="flex-1 py-3.5 px-2 bg-yellow-100 text-yellow-800 rounded-md font-bold hover:bg-yellow-200">途中保存</button><button onClick={() => handleSubmitShift(true)} className="flex-[2] py-3.5 px-2 bg-blue-600 text-white rounded-md font-bold hover:bg-blue-700 shadow-md">提出する</button></>
+                            <>
+                              <button 
+                                onClick={() => handleSubmitShift(false)} 
+                                disabled={isLoading} 
+                                className={`flex-1 py-3.5 px-2 rounded-md font-bold transition-colors ${isLoading ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'}`}
+                              >
+                                {isLoading ? '処理中...' : '途中保存'}
+                              </button>
+                              <button 
+                                onClick={() => handleSubmitShift(true)} 
+                                disabled={isLoading} 
+                                className={`flex-[2] py-3.5 px-2 rounded-md font-bold shadow-md transition-colors ${isLoading ? 'bg-gray-400 text-white cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                              >
+                                {isLoading ? '処理中...' : '提出する'}
+                              </button>
+                            </>
                           ) : (
-                            <button onClick={() => handleSubmitShift(true)} className="w-full py-3.5 px-4 bg-blue-50 text-blue-700 border border-blue-200 rounded-md font-bold hover:bg-blue-100">修正して再提出する</button>
+                            <button 
+                              onClick={() => handleSubmitShift(true)} 
+                              disabled={isLoading} 
+                              className={`w-full py-3.5 px-4 rounded-md font-bold border transition-colors ${isLoading ? 'bg-gray-300 text-white border-gray-300 cursor-not-allowed' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}
+                            >
+                              {isLoading ? '処理中...' : '修正して再提出する'}
+                            </button>
                           )}
                         </div>
                       );
@@ -3022,9 +3045,17 @@
                   <div className="animate-fade-in">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                       <div className="bg-white rounded-md shadow-sm overflow-hidden border border-indigo-100 flex flex-col max-h-[350px]">
-                        {/* ▼▼ 修正：パネルの右上にポップアップ表示ボタンを追加 ▼▼ */}
+                        {/* ▼▼ 修正：パネルの右上にポップアップ表示ボタンを追加 ＆ バッジを赤丸・数字のみにデザイン変更 ▼▼ */}
                     <div className="bg-indigo-50 px-4 py-3 border-b flex justify-between items-center">
-                      <h3 className="font-bold text-indigo-900 flex items-center gap-2"><Icon name="bell" /> 通知・変更申請</h3>
+                      <h3 className="font-bold text-indigo-900 flex items-center gap-2">
+                        <Icon name="bell" /> 通知・変更申請
+                        {/* ▼ バッジを完全な丸型(w-6 h-6)にし、文字サイズを text-sm に拡大、「件」を削除 ▼ */}
+                        {unreadCount > 0 && (
+                          <span className="bg-red-500 text-white text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full shadow-sm ml-1 leading-none">
+                            {unreadCount}
+                          </span>
+                        )}
+                      </h3>
                       <button 
                         onClick={() => setIsNotificationModalOpen(true)}
                         className="bg-white border border-indigo-200 text-indigo-600 px-3 py-1.5 text-xs font-bold rounded-md hover:bg-indigo-100 shadow-sm flex items-center gap-1 transition-colors"
@@ -3136,33 +3167,46 @@
                         </div>
                       </div>
 
-                      <div className="bg-white rounded-md shadow-sm p-5 border border-indigo-100 flex flex-col justify-center gap-5">
-                        <div className="flex items-center justify-between">
+                      {/* ▼▼ 修正：シフト設定パネルを画像のレイアウトに合わせて整理 ▼▼ */}
+                      <div className="bg-white rounded-md shadow-sm p-6 border border-indigo-100 flex flex-col gap-6">
+                        
+                        {/* 1行目：タイトルとメール送信系 */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                           <div className="flex items-center gap-3">
                             <Icon name="calendar-alt" size={24} className="text-indigo-600" />
-                            <h2 className="text-lg font-bold text-gray-800">{currentMonth}月のシフト設定</h2>
-                            {isActiveMonth ? (<span className="ml-2 bg-green-100 text-green-700 rounded-full text-sm px-3 py-1 font-bold border border-green-200">募集中</span>) : currentMonthStr < activeTargetMonth ? (<span className="ml-2 bg-gray-100 text-gray-500 rounded-full text-sm px-3 py-1 font-bold border">過去</span>) : (<span className="ml-2 bg-blue-50 text-blue-600 rounded-full text-sm px-3 py-1 font-bold border">未来</span>)}
+                            <h2 className="text-xl font-bold text-gray-800">{currentMonth}月のシフト設定</h2>
+                            {isActiveMonth ? (<span className="bg-green-100 text-green-700 rounded-full text-sm px-4 py-1 font-bold border border-green-200 shadow-sm">募集中</span>) : currentMonthStr < activeTargetMonth ? (<span className="bg-gray-100 text-gray-500 rounded-full text-sm px-4 py-1 font-bold border shadow-sm">過去</span>) : (<span className="bg-blue-50 text-blue-600 rounded-full text-sm px-4 py-1 font-bold border shadow-sm">未来</span>)}
                           </div>
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => setIsMailHistoryOpen(true)} className="bg-gray-100 rounded-md hover:bg-gray-200 font-bold py-2 px-4 text-sm shadow-sm flex items-center gap-2"><Icon name="history"/> 送信履歴</button>
-                            <button onClick={openMailForm} className="bg-blue-600 rounded-md hover:bg-blue-700 text-white font-bold py-2 px-4 text-sm shadow-sm flex items-center gap-2"><Icon name="envelope" /> メール送信</button>
+                          <div className="flex items-center gap-3">
+                            <button onClick={() => setIsMailHistoryOpen(true)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 px-5 rounded-md text-sm shadow-sm flex items-center gap-2 transition-colors"><Icon name="history"/> 送信履歴</button>
+                            <button onClick={openMailForm} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-5 rounded-md text-sm shadow-sm flex items-center gap-2 transition-colors"><Icon name="envelope" /> メール送信</button>
                           </div>
                         </div>
-                        <div className="flex flex-wrap items-center justify-between gap-4 pb-1">
-                          <div className="flex flex-wrap items-center gap-3">
-                            {!isActiveMonth && <button onClick={setAsActiveMonth} className="flex items-center gap-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 px-4 py-2.5 text-sm font-bold"><Icon name="play-circle" size={18}/> 募集にする</button>}
-                            <div className="flex items-center gap-3 bg-gray-50 rounded-md px-4 py-2.5 border">
-                              <span className="text-sm font-bold text-gray-700">締切日:</span>
-                              <input type="date" value={deadline} onChange={handleUpdateDeadline} className="bg-white rounded-md border text-sm px-3 py-1.5 focus:ring-2 focus:ring-indigo-300 outline-none" />
-                            </div>
+                        
+                        {/* 2行目：締切日設定 */}
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                          <div className="flex items-center gap-3 bg-gray-50/50 rounded-md px-5 py-3 border border-gray-200 shadow-sm">
+                            <span className="text-sm font-bold text-gray-700">締切日:</span>
+                            <input type="date" value={deadline} onChange={handleUpdateDeadline} className="bg-white rounded-md border border-gray-300 text-sm px-4 py-2 focus:ring-2 focus:ring-indigo-300 outline-none text-gray-700 font-bold cursor-pointer" />
                           </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button onClick={() => setModal({isOpen: true, type: 'daily', targetId: null, text: '', selectedDays: []})} className="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-4 py-2.5 text-sm font-bold flex gap-2 shadow-sm"><Icon name="pen" size={16}/> 日別メモの一括設定</button>
-                            <button onClick={applyFixedShiftsToMonth} className="bg-emerald-100 text-emerald-800 border hover:bg-emerald-200 px-4 py-2.5 text-sm font-bold flex gap-2 shadow-sm"><Icon name="magic" size={16}/> 固定シフト反映</button>
-                            <button onClick={toggleConfirmAll} disabled={!isActiveMonth} className={`px-5 py-2.5 rounded-md font-bold text-sm flex items-center gap-2 shadow-sm ${isConfirmed ? 'bg-green-100 text-green-800 border hover:bg-red-50 hover:text-red-700' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>
-                              <Icon name={isConfirmed ? "unlock" : "check-circle"} size={18}/> {isConfirmed ? '確定解除' : '全体確定する'}
+                          {!isActiveMonth && (
+                            <button onClick={setAsActiveMonth} className="flex items-center gap-2 bg-indigo-100 text-indigo-800 border border-indigo-200 hover:bg-indigo-200 px-5 py-3 rounded-md text-sm font-bold shadow-sm transition-colors">
+                              <Icon name="play-circle" size={18}/> この月を募集にする
                             </button>
-                          </div>
+                          )}
+                        </div>
+
+                        {/* 3行目：アクションボタン群 */}
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button onClick={() => setModal({isOpen: true, type: 'daily', targetId: null, text: '', selectedDays: []})} className="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-5 py-3 rounded-md text-sm font-bold flex items-center gap-2 shadow-sm transition-colors">
+                            <Icon name="pen" size={16}/> 日別メモの一括設定
+                          </button>
+                          <button onClick={applyFixedShiftsToMonth} className="bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 px-5 py-3 rounded-md text-sm font-bold flex items-center gap-2 shadow-sm transition-colors">
+                            <Icon name="magic" size={16}/> 固定シフト反映
+                          </button>
+                          <button onClick={toggleConfirmAll} disabled={!isActiveMonth} className={`px-6 py-3 rounded-md font-bold text-sm flex items-center gap-2 shadow-sm transition-colors ${isConfirmed ? 'bg-green-50 text-green-700 border border-green-200 hover:bg-red-50 hover:text-red-700 hover:border-red-200' : 'bg-indigo-600 text-white border border-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed'}`}>
+                            <Icon name={isConfirmed ? "unlock" : "check-circle"} size={18}/> {isConfirmed ? '確定解除' : '全体確定する'}
+                          </button>
                         </div>
                       </div>
                     </div>
