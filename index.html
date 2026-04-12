@@ -430,11 +430,14 @@
                 setShifts(prev => {
                   const newShifts = { ...shiftsState };
                   // 【重要】スタッフが現在入力中のデータを上書きして消さないための保護処理
-                  if (currentUser && currentUser.role === 'staff' && activeTargetMonth) {
-                    if (prev[activeTargetMonth] && prev[activeTargetMonth][currentUser.id]) {
-                      if (!newShifts[activeTargetMonth]) newShifts[activeTargetMonth] = {};
-                      newShifts[activeTargetMonth][currentUser.id] = prev[activeTargetMonth][currentUser.id];
-                    }
+                  // ▼ 修正：管理者（SV）が入力中の場合も、自分自身のデータを保護するように条件を変更
+                  if (currentUser) {
+                    Object.keys(prev).forEach(monthKey => {
+                      if (prev[monthKey] && prev[monthKey][currentUser.id]) {
+                        if (!newShifts[monthKey]) newShifts[monthKey] = {};
+                        newShifts[monthKey][currentUser.id] = prev[monthKey][currentUser.id];
+                      }
+                    });
                   }
                   return newShifts;
                 });
@@ -928,11 +931,15 @@
 
             setShifts(prev => {
               const newShifts = { ...shiftsState };
-              if (currentUser && currentUser.role === 'staff' && activeTargetMonth) {
-                if (prev[activeTargetMonth] && prev[activeTargetMonth][currentUser.id]) {
-                  if (!newShifts[activeTargetMonth]) newShifts[activeTargetMonth] = {};
-                  newShifts[activeTargetMonth][currentUser.id] = prev[activeTargetMonth][currentUser.id];
-                }
+              // 【重要】スタッフが現在入力中のデータを上書きして消さないための保護処理
+              // ▼ 修正：管理者（SV）が入力中の場合も、自分自身のデータを保護するように条件を変更
+              if (currentUser) {
+                Object.keys(prev).forEach(monthKey => {
+                  if (prev[monthKey] && prev[monthKey][currentUser.id]) {
+                    if (!newShifts[monthKey]) newShifts[monthKey] = {};
+                    newShifts[monthKey][currentUser.id] = prev[monthKey][currentUser.id];
+                  }
+                });
               }
               return newShifts;
             });
