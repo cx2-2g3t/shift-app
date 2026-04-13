@@ -2943,6 +2943,22 @@
                                         <span className="text-[8px] text-gray-500 font-bold leading-none">可</span>
                                       </label>
                                     )}
+
+                                    {/* ▼▼ 追加：月間表示用の超小型「備考」入力欄 ▼▼ */}
+                                    {s.status !== '未' && (
+                                      <div className="flex items-center bg-white border border-gray-300 rounded mt-0.5 px-1 relative z-10 focus-within:ring-1 focus-within:ring-blue-300">
+                                        <Icon name="comment-dots" className="text-[8px] text-gray-400 mr-0.5 shrink-0" />
+                                        <input 
+                                          type="text" 
+                                          value={s.note || ''} 
+                                          onChange={(e) => updateLocalShift(day, 'note', e.target.value)} 
+                                          disabled={rowDisabled} 
+                                          placeholder="備考" 
+                                          className="w-full text-[9px] sm:text-[10px] py-0.5 outline-none bg-transparent text-gray-700 font-normal" 
+                                        />
+                                      </div>
+                                    )}
+
                                   </div>
                                 </div>
                               );
@@ -2979,31 +2995,34 @@
 
                     if (showSubmit) {
                       return (
-                        <div className="flex gap-3 sm:gap-4 justify-center max-w-4xl mx-auto w-full">
+                        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center max-w-4xl mx-auto w-full">
                           {myStatus !== '提出済' ? (
                             <>
+                              {/* ▼ 修正：オレンジ地に白文字、文言を「途中保存」に戻す ▼ */}
                               <button 
                                 onClick={() => handleSubmitShift(false)} 
                                 disabled={isLoading} 
-                                className={`flex-1 py-3.5 px-2 rounded-md font-bold transition-colors ${isLoading ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'}`}
+                                className={`flex-1 py-3.5 px-2 rounded-md font-bold flex items-center justify-center gap-2 transition-colors ${isLoading ? 'bg-gray-400 text-white cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600 shadow-sm'}`}
                               >
-                                {isLoading ? '処理中...' : '途中保存'}
+                                <Icon name="save" size={18} /> {isLoading ? '処理中...' : '途中保存'}
                               </button>
+                              
+                              {/* ▼ 修正：提出ボタンもアイコンをつけてより直感的に ▼ */}
                               <button 
                                 onClick={() => handleSubmitShift(true)} 
                                 disabled={isLoading} 
-                                className={`flex-[2] py-3.5 px-2 rounded-md font-bold shadow-md transition-colors ${isLoading ? 'bg-gray-400 text-white cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                                className={`flex-[2] py-3.5 px-2 rounded-md font-bold flex items-center justify-center gap-2 shadow-md transition-colors ${isLoading ? 'bg-gray-400 text-white cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
                               >
-                                {isLoading ? '処理中...' : '提出する'}
+                                <Icon name="paper-plane" size={18} /> {isLoading ? '処理中...' : 'シフトを提出する'}
                               </button>
                             </>
                           ) : (
                             <button 
                               onClick={() => handleSubmitShift(true)} 
                               disabled={isLoading} 
-                              className={`w-full py-3.5 px-4 rounded-md font-bold border transition-colors ${isLoading ? 'bg-gray-300 text-white border-gray-300 cursor-not-allowed' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}
+                              className={`w-full py-3.5 px-4 rounded-md font-bold border-2 flex items-center justify-center gap-2 transition-colors ${isLoading ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-blue-50 text-blue-700 border-blue-300 hover:bg-blue-100 shadow-sm'}`}
                             >
-                              {isLoading ? '処理中...' : '修正して再提出する'}
+                              <Icon name="redo" size={18} /> {isLoading ? '処理中...' : '修正して再提出する'}
                             </button>
                           )}
                         </div>
