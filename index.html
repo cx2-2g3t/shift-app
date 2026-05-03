@@ -178,7 +178,8 @@
       
       const [newStaff, setNewStaff] = useState({ employeeId: '', name: '', email: '', isAdmin: false, employmentCategory: '', position: '' });
       const [editStaffForm, setEditStaffForm] = useState({ isOpen: false, user: null, name: '', email: '', employmentCategory: '', isAdmin: false, position: '' });
-      const [displayFilter, setDisplayFilter] = useState('all'); // 'all', 'admin', 'staff'
+      const [displayFilter, setDisplayFilter] = useState('all');
+      const [submissionFilter, setSubmissionFilter] = useState('all');
       const [staffSearchQuery, setStaffSearchQuery] = useState('');
       const [shiftSearchQuery, setShiftSearchQuery] = useState('');
 
@@ -709,9 +710,17 @@
         setCurrentUser(user); setView(user.role);
         setEmployeeIdInput(''); setPasswordInput(''); setPasswordConfirm('');
         setLoginStep('login'); setTempUser(null); setIsResetMode(false); setShowPassword(false); setShowPasswordConfirm(false);
-        if (user.role === 'staff') {
+        
+        // ログイン直後のカレンダー表示月を「募集中ならその月、確定済なら当月」にする
+        if (!isConfirmed) {
+          // 募集中の月（未確定）がある場合は、その月を表示
           const [y, m] = activeTargetMonth.split('-');
           setDisplayDate(new Date(parseInt(y), parseInt(m) - 1, 1));
+        } else {
+          // すでに全体確定されていて「募集中の月」がない場合は、現実の「今月」を表示
+          const currentRealYear = new Date().getFullYear();
+          const currentRealMonth = new Date().getMonth() + 1;
+          setDisplayDate(new Date(currentRealYear, currentRealMonth - 1, 1));
         }
       };
 
@@ -2296,24 +2305,29 @@
                 <div className="flex items-center gap-2 mb-1">
                   <h1 className="text-xs sm:text-sm font-bold opacity-90">{view === 'admin' ? "シフトの窓口（管理画面）" : "シフトの窓口"}</h1>
                   {(() => {
-                    // 現実の「今月」を表す文字列を作成 (例: 2026-04)
-                    const todayStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+                    const currentRealYear = new Date().getFullYear();
+                    const currentRealMonth = new Date().getMonth() + 1;
+                    const todayStr = `${currentRealYear}-${String(currentRealMonth).padStart(2, '0')}`;
                     
-                    // 1. 募集中の月（activeTargetMonth）を開いている場合
-                    if (currentMonthStr === activeTargetMonth) {
-                      return <span className="bg-blue-100 text-blue-800 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded border border-blue-200 shadow-sm flex items-center gap-1"><Icon name="play-circle" className="text-blue-600"/>現在募集中</span>;
-                    } 
-                    // 2. 募集中ではないが、現実の「今月」を開いている場合
-                    else if (currentMonthStr === todayStr) {
-                      return <span className="bg-green-100 text-green-800 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded border border-green-200 shadow-sm flex items-center gap-1"><Icon name="calendar-check" className="text-green-600"/>当月のシフト</span>;
+                    // 1. 【最優先】現実の「今月」を開いている場合
+                    if (currentMonthStr === todayStr) {
+                      return <span className="bg-white text-green-700 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><Icon name="calendar-check" className="text-green-500"/>当月のシフト</span>;
                     }
-                    // 3. 現実の「今月」よりも前の月を開いている場合
+                    // 2. 募集中の月で、まだ確定されていない場合
+                    else if (currentMonthStr === activeTargetMonth && !isConfirmed) {
+                      return <span className="bg-white text-blue-700 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><Icon name="play-circle" className="text-blue-500"/>現在募集中</span>;
+                    } 
+                    // 3. 募集中の月だが、すでに「全体確定」されている場合
+                    else if (currentMonthStr === activeTargetMonth && isConfirmed) {
+                      return <span className="bg-white text-gray-700 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><Icon name="lock" className="text-gray-500"/>確定済</span>;
+                    }
+                    // 4. 現実の「今月」よりも前の月を開いている場合
                     else if (currentMonthStr < todayStr) {
                       return <span className="bg-gray-600 text-white text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><Icon name="history" />過去のシフト</span>;
                     } 
-                    // 4. それ以外（未来の月）
+                    // 5. それ以外（未来の月）
                     else {
-                      return <span className="bg-purple-100 text-purple-800 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded border border-purple-200 shadow-sm flex items-center gap-1"><Icon name="star" className="text-purple-600"/>未来のシフト</span>;
+                      return <span className="bg-white text-purple-700 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded shadow-sm flex items-center gap-1"><Icon name="star" className="text-purple-500"/>未来のシフト</span>;
                     }
                   })()}
                 </div>
@@ -2639,6 +2653,13 @@
       const filteredShiftUsers = staffUsers.filter(u => {
         if (displayFilter === 'admin' && u.role !== 'admin') return false;
         if (displayFilter === 'staff' && u.role === 'admin') return false;
+        
+        // ▼ 提出状況（未提出・途中保存・提出済）による絞り込み
+        const statusText = currentMonthStatus[u.id] || '未提出';
+        if (submissionFilter === 'submitted' && statusText !== '提出済') return false;
+        if (submissionFilter === 'draft' && statusText !== '途中保存') return false;
+        if (submissionFilter === 'unsubmitted' && statusText !== '未提出') return false;
+
         return (u.name || '').includes(shiftSearchQuery) || 
                String(u.employeeId || '').includes(shiftSearchQuery) ||
                (u.employmentCategory || '').includes(shiftSearchQuery);
@@ -3201,7 +3222,7 @@
                           <div className="flex items-center gap-3">
                             <Icon name="calendar-alt" size={24} className="text-indigo-600" />
                             <h2 className="text-xl font-bold text-gray-800">{currentMonth}月のシフト設定</h2>
-                            {isActiveMonth ? (<span className="bg-green-100 text-green-700 rounded-full text-sm px-4 py-1 font-bold border border-green-200 shadow-sm">募集中</span>) : currentMonthStr < activeTargetMonth ? (<span className="bg-gray-100 text-gray-500 rounded-full text-sm px-4 py-1 font-bold border shadow-sm">過去</span>) : (<span className="bg-blue-50 text-blue-600 rounded-full text-sm px-4 py-1 font-bold border shadow-sm">未来</span>)}
+                            {isActiveMonth && !isConfirmed ? (<span className="bg-green-100 text-green-700 rounded-full text-sm px-4 py-1 font-bold border border-green-200 shadow-sm">募集中</span>) : isActiveMonth && isConfirmed ? (<span className="bg-gray-100 text-gray-600 rounded-full text-sm px-4 py-1 font-bold border border-gray-300 shadow-sm"><Icon name="lock" className="mr-1"/>確定済</span>) : currentMonthStr < activeTargetMonth ? (<span className="bg-gray-100 text-gray-500 rounded-full text-sm px-4 py-1 font-bold border shadow-sm">過去</span>) : (<span className="bg-blue-50 text-blue-600 rounded-full text-sm px-4 py-1 font-bold border shadow-sm">未来</span>)}
                           </div>
                           <div className="flex items-center gap-3">
                             <button onClick={() => setIsMailHistoryOpen(true)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 px-5 rounded-md text-sm shadow-sm flex items-center gap-2 transition-colors"><Icon name="history"/> 送信履歴</button>
@@ -3241,12 +3262,20 @@
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
                         <div className="flex items-center gap-3 flex-wrap">
                           <h2 className="text-base sm:text-lg font-bold text-gray-800 flex items-center gap-2">
-                            <Icon name="calendar" size={20} className="text-indigo-600 hidden sm:block" /> {shiftViewMode === 'month' ? '月間シフト表' : '日別ガントチャート'}
+                            <Icon name="calendar" size={20} className="text-indigo-600 hidden sm:block" /> {shiftViewMode === 'month' ? '月間シフト表' : '日別シフト表'}
                           </h2>
                           <select value={displayFilter} onChange={e => setDisplayFilter(e.target.value)} className="border border-gray-300 rounded-md px-3 py-1.5 text-sm font-bold text-gray-700 outline-none focus:ring-2 focus:ring-indigo-300 bg-gray-50 cursor-pointer">
                             <option value="all">全員を表示</option>
                             <option value="admin">管理者のみ</option>
                             <option value="staff">オペレーターのみ</option>
+                          </select>
+                          
+                          {/* ▼ 提出状況の絞り込みプルダウン ▼ */}
+                          <select value={submissionFilter} onChange={e => setSubmissionFilter(e.target.value)} className="border border-gray-300 rounded-md px-3 py-1.5 text-sm font-bold text-gray-700 outline-none focus:ring-2 focus:ring-indigo-300 bg-gray-50 cursor-pointer">
+                            <option value="all">全ての提出状況</option>
+                            <option value="submitted">提出済のみ</option>
+                            <option value="draft">途中保存のみ</option>
+                            <option value="unsubmitted">未提出のみ</option>
                           </select>
                         </div>
                         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
@@ -3897,7 +3926,7 @@
                             </tbody>
                           </table>
                         </div>
-                        <p className="text-xs text-gray-500 font-bold"><Icon name="info-circle" className="text-blue-500 mr-1"/>ここに入力した目標人数は自動的に保存され、日別ガントチャートの実績エリアに反映されます。</p>
+                        <p className="text-xs text-gray-500 font-bold"><Icon name="info-circle" className="text-blue-500 mr-1"/>ここに入力した目標人数は自動的に保存され、日別シフト表の実績エリアに反映されます。</p>
                       </div>
                     </div>
 
